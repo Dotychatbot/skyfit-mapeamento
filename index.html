@@ -259,6 +259,7 @@ const LOGO_SKYFIT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAA
    ========================================================= */
 
 /* ---------- CONFIG ---------- */
+const APP_VERSAO = "2026-08-29.2"; // atualizar a cada mudança publicada, ajuda a confirmar se o link está com a versão mais nova
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA9DT4_HMSnFZB3gpFrF35vRr36Aiu0osw",
   authDomain: "skyfit-mapeamento.firebaseapp.com",
@@ -479,6 +480,9 @@ function renderLogin(){
       </div>
       <div class="err" id="loginErr"></div>
       <button class="btn btn-primary" id="btnLogin">Entrar</button>
+      <p style="text-align:center;font-size:10.5px;color:var(--muted);margin:16px 0 0;">
+        Versão ${APP_VERSAO} · ${firebaseReady ? "☁️ Nuvem conectada" : "⚠️ Nuvem não conectada — salvando só neste aparelho"}
+      </p>
     </div>
   </div>`;
 }
@@ -1077,7 +1081,7 @@ function tabFechamento(){
       <div class="txt" style="flex:1;">
         <b>Salvar no histórico</b>
         <span>${firebaseReady ? "Salva na nuvem (Firebase)" : "Firebase ainda não configurado — salva localmente neste navegador"} — inclui o treino, mesmo que não apareça no PDF do aluno</span>
-        <div class="status-msg ${state.saveStatus==='ok'?'success':state.saveStatus==='err'?'error':''}">${state.saveStatus==='ok'?'✓ Salvo com sucesso':state.saveStatus==='err'?'Erro ao salvar':''}</div>
+        <div class="status-msg ${state.saveStatus==='ok'?'success':state.saveStatus==='err'?'error':''}">${state.saveStatus==='ok'?'✓ Salvo com sucesso':state.saveStatus==='err'?'Erro ao salvar: '+(state.saveError||'motivo desconhecido'):''}</div>
       </div>
       <button class="btn btn-navy" id="btnSalvar">Salvar</button>
     </div>
@@ -1307,9 +1311,11 @@ async function salvarAtendimento(){
       localStorage.setItem(key, JSON.stringify(arr));
     }
     state.saveStatus = "ok";
+    state.saveError = "";
   }catch(e){
     console.error(e);
     state.saveStatus = "err";
+    state.saveError = e && e.message ? e.message : "falha desconhecida";
   }
   render();
 }
@@ -1319,6 +1325,7 @@ async function carregarAtendimentos(){
   try{
     if (firebaseReady && db){
       const snap = await db.collection("atendimentos").get();
+      state.firestoreErro = "";
       return snap.docs.map(d=>d.data());
     } else {
       const key = "skyfit_atendimentos";
@@ -1326,6 +1333,7 @@ async function carregarAtendimentos(){
     }
   }catch(e){
     console.error(e);
+    state.firestoreErro = e && e.message ? e.message : "falha desconhecida ao ler a nuvem";
     return [];
   }
 }
@@ -1354,7 +1362,9 @@ function formatarDataBR(isoStr){
 function tabAlunos(){
   if (state.alunoSelecionado) {
     const a = state.alunoSelecionado;
-    const defs = Object.keys(a.deficienciasSelecionadas || {}).filter(k => a.deficienciasSelecionadas[k]);
+    const defs = Array.isArray(a.deficiencias)
+      ? a.deficiencias
+      : Object.keys(a.deficienciasSelecionadas || {}).filter(k => a.deficienciasSelecionadas[k]);
     return `
     <h2>Histórico do Aluno</h2>
     <button class="btn btn-outline" onclick="voltarListaAlunos()">&larr; Voltar à busca</button>
@@ -1481,6 +1491,7 @@ function tabEstatisticas(){
   }
 
   const s = state.statsData;
+  const avisoErro = state.firestoreErro ? `<div class="err" style="display:block;margin-bottom:14px;">⚠️ Erro ao ler a nuvem: ${state.firestoreErro}. Provavelmente as regras do Firestore ainda não estão liberadas — confira em Firestore Database → Regras se está publicado "allow read, write: if true;".</div>` : "";
   const profEntries = Object.entries(s.porProfessor).sort((a,b)=>b[1]-a[1]);
   const maxProf = Math.max(1, ...profEntries.map(e=>e[1]));
 
@@ -1493,6 +1504,7 @@ function tabEstatisticas(){
   return `
   <h2>Estatísticas</h2>
   <p class="desc">${firebaseReady ? "Dados consolidados na nuvem." : "Dados deste aparelho (localStorage) — quando o Firebase for configurado, isso passa a somar todos os professores."}</p>
+  ${avisoErro}
 
   <div class="grid2" style="margin-bottom:20px;">
     <div class="summary-mini" style="text-align:center;">
@@ -1553,12 +1565,14 @@ async function carregarAvaliacoes(){
   try{
     if (firebaseReady && db){
       const snap = await db.collection("avaliacoes").get();
+      state.firestoreErro = "";
       return snap.docs.map(d=>d.data());
     } else {
       return JSON.parse(localStorage.getItem("skyfit_avaliacoes") || "[]");
     }
   }catch(e){
     console.error(e);
+    state.firestoreErro = e && e.message ? e.message : "falha desconhecida ao ler a nuvem";
     return [];
   }
 }
@@ -1601,9 +1615,11 @@ function tabAvaliacoes(){
     <div class="ai-box"><div class="spinner"></div><p style="color:var(--muted);font-size:13px;margin:0;">Carregando...</p></div>`;
   }
   const a = state.avaliacoesData;
+  const avisoErro = state.firestoreErro ? `<div class="err" style="display:block;margin-bottom:14px;">⚠️ Erro ao ler a nuvem: ${state.firestoreErro}. Provavelmente as regras do Firestore ainda não estão liberadas — confira em Firestore Database → Regras se está publicado "allow read, write: if true;".</div>` : "";
   return `
   <h2>Avaliações dos Alunos</h2>
   <p class="desc">Respostas 100% anônimas — vinculadas apenas ao atendimento, nunca ao nome do aluno. Só o administrador acessa esta aba.</p>
+  ${avisoErro}
 
   <div class="grid2" style="margin-bottom:20px;">
     <div class="summary-mini" style="text-align:center;">
@@ -1793,11 +1809,15 @@ function attachAppEvents(){
     if (state.saveStatus !== "ok"){
       await salvarAtendimento();
     }
+    if (state.saveStatus !== "ok"){
+      toast("Não foi possível salvar o atendimento — o link do PDF pode não funcionar. Verifique o erro na aba Fechamento antes de enviar.");
+    }
     const id = getAtendimentoId();
     const baseUrl = window.location.href.split("?")[0];
     const linkAvaliacao = `${baseUrl}?avaliar=${id}`;
+    const linkPdf = `${baseUrl}?pdf=${id}`;
     const texto = encodeURIComponent(
-      `*Protocolo de Mapeamento Biomecânico — Skyfit Park Palmeiras*\nAluno: ${state.aluno.nome}\nAvaliador: ${state.professor}\nData: ${state.aluno.data}\n\nAqui está o resumo do seu atendimento em PDF (anexar ao enviar).\n\nPor favor, avalie seu atendimento com o professor ${state.professor} através do link abaixo (rápido e anônimo):\n${linkAvaliacao}`
+      `*Protocolo de Mapeamento Biomecânico — Skyfit Park Palmeiras*\nAluno: ${state.aluno.nome}\nAvaliador: ${state.professor}\nData: ${state.aluno.data}\n\nBaixe o PDF do seu atendimento aqui:\n${linkPdf}\n\nPor favor, avalie seu atendimento com o professor ${state.professor} através do link abaixo (rápido e anônimo):\n${linkAvaliacao}`
     );
     window.open(`https://wa.me/55${num}?text=${texto}`, "_blank");
   };
@@ -1831,6 +1851,70 @@ async function buscarAtendimentoPorId(id){
       return found ? { professor: found.professor||"", primeiroAtendimento: !!(found.aluno && found.aluno.primeiroAtendimento) } : { professor:"", primeiroAtendimento:false };
     }
   }catch(e){ console.error(e); return { professor:"", primeiroAtendimento:false }; }
+}
+
+/* ---------- TELA PÚBLICA: BAIXAR PDF DO ALUNO POR LINK ---------- */
+async function buscarAtendimentoCompletoPorId(id){
+  try{
+    if (firebaseReady && db){
+      const snap = await db.collection("atendimentos").where("id","==",id).limit(1).get();
+      if (!snap.empty) return snap.docs[0].data();
+      return null;
+    } else {
+      const arr = JSON.parse(localStorage.getItem("skyfit_atendimentos") || "[]");
+      return arr.find(a=>a.id===id) || null;
+    }
+  }catch(e){ console.error(e); return null; }
+}
+
+function registroParaDadosPDF(registro){
+  const deficienciasSelecionadas = {};
+  (registro.deficiencias || []).forEach(k => { deficienciasSelecionadas[k] = true; });
+  return {
+    aluno: registro.aluno,
+    professor: registro.professor,
+    anamnese: registro.anamnese,
+    testes: registro.testes,
+    squat: registro.squat,
+    deficienciasSelecionadas,
+    deficienciaObsExtra: registro.deficienciaObsExtra,
+    treino: registro.treino,
+    atendimentoId: registro.id
+  };
+}
+
+async function renderPdfPublico(id){
+  const root = document.getElementById("root");
+  root.innerHTML = `
+  <div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <div class="spinner"></div>
+    <p class="sub" style="text-transform:none;letter-spacing:0;margin-top:10px;">Carregando seu atendimento...</p>
+  </div></div>`;
+
+  const registro = await buscarAtendimentoCompletoPorId(id);
+
+  if (!registro){
+    root.innerHTML = `
+    <div class="login-wrap"><div class="login-card" style="text-align:center;">
+      <h1>Link inválido</h1>
+      <p class="sub" style="text-transform:none;letter-spacing:0;">Não encontramos esse atendimento. Peça ao professor para gerar o link de novo.</p>
+    </div></div>`;
+    return;
+  }
+
+  root.innerHTML = `
+  <div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <img src="${LOGO_SKYFIT}" alt="Skyfit Park Palmeiras" style="display:block;width:100px;height:100px;margin:0 auto 14px;object-fit:contain;"/>
+    <h1>Seu PDF está pronto</h1>
+    <p class="sub" style="text-transform:none;letter-spacing:0;">${registro.aluno && registro.aluno.nome ? registro.aluno.nome : "Aluno"} • Skyfit Park Palmeiras</p>
+    <button class="btn btn-primary" id="btnBaixarPdfPublico" style="margin-top:10px;">📄 Baixar meu PDF</button>
+    <p class="hint" style="margin-top:14px;">Toque no botão acima — o arquivo é baixado direto no seu celular.</p>
+  </div></div>`;
+
+  document.getElementById("btnBaixarPdfPublico").onclick = ()=>{
+    const doc = gerarPDF(false, registroParaDadosPDF(registro));
+    doc.save(`Mapeamento_${(registro.aluno && registro.aluno.nome || "aluno").replace(/\s+/g,"_")}.pdf`);
+  };
 }
 
 async function renderAvaliacaoPublica(id){
@@ -1955,15 +2039,18 @@ async function renderAvaliacaoPublica(id){
       renderAvaliacaoPublica(id);
     }catch(e){
       console.error(e);
-      err.textContent = "Erro ao enviar. Tente novamente.";
+      err.textContent = "Erro ao enviar: " + (e && e.message ? e.message : "falha desconhecida") + ". Tire um print desta tela e mande pro professor.";
     }
   };
 }
 
 const urlParams = new URLSearchParams(window.location.search);
 const avaliarId = urlParams.get("avaliar");
+const pdfId = urlParams.get("pdf");
 if (avaliarId){
   renderAvaliacaoPublica(avaliarId);
+} else if (pdfId){
+  renderPdfPublico(pdfId);
 } else {
   render();
 }
