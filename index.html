@@ -259,7 +259,7 @@ const LOGO_SKYFIT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAA
    ========================================================= */
 
 /* ---------- CONFIG ---------- */
-const APP_VERSAO = "2026-08-29.2"; // atualizar a cada mudança publicada, ajuda a confirmar se o link está com a versão mais nova
+const APP_VERSAO = "2026-08-29.3"; // atualizar a cada mudança publicada, ajuda a confirmar se o link está com a versão mais nova
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA9DT4_HMSnFZB3gpFrF35vRr36Aiu0osw",
   authDomain: "skyfit-mapeamento.firebaseapp.com",
@@ -393,7 +393,7 @@ const state = {
   activeTab: 0,
   atendimentoId: null,
   aluno: {nome:"", dataNasc:"", data: new Date().toISOString().slice(0,10), primeiroAtendimento: false},
-  anamnese: {historico:"", limitacoes:"", cirurgias:"", restricoes:"", objetivo:""},
+  anamnese: {historico:"", limitacoes:"", cirurgias:"", restricoes:"", objetivo:"", parq:{q1:"",q2:"",q3:"",q4:"",q5:"",q6:"",q7:""}, parqDetalhes:"", consentimentoParq:false},
   testes: {
     tornozelo:{status:"", obs:""},
     thomas:{status:"", obs:""},
@@ -720,12 +720,23 @@ function tabProtocolos(){
 /* ===== TAB 0: ANAMNESE ===== */
 function tabAnamnese(){
   const a = state.aluno, an = state.anamnese;
+  const idade = calcularIdade(a.dataNasc);
   return `
   <h2>Identificação e Anamnese</h2>
   <p class="desc">Dados do aluno e histórico técnico do atendimento.</p>
   <div class="grid2">
     <div class="field"><label>Nome do aluno</label><input id="alNome" value="${a.nome}"/></div>
     <div class="field"><label>Data do atendimento</label><input id="alData" type="date" value="${a.data}"/></div>
+  </div>
+  <div class="grid2">
+    <div class="field">
+      <label>Data de nascimento</label>
+      <input id="alDataNasc" type="date" value="${a.dataNasc||''}"/>
+    </div>
+    <div class="field">
+      <label>Idade</label>
+      <input value="${idade !== null ? idade + ' anos' : '—'}" disabled style="background:#f3f5f9;color:var(--muted);"/>
+    </div>
   </div>
   <label class="defic-item" style="cursor:pointer;">
     <input type="checkbox" id="alPrimeiro" ${a.primeiroAtendimento ? 'checked' : ''}/>
@@ -739,6 +750,28 @@ function tabAnamnese(){
   <div class="field"><label>Cirurgias / lesões</label><textarea id="anCir" rows="2">${an.cirurgias}</textarea></div>
   <div class="field"><label>Restrições médicas</label><textarea id="anRes" rows="2">${an.restricoes}</textarea></div>
   <div class="field"><label>Objetivo principal</label><textarea id="anObj" rows="2">${an.objetivo}</textarea></div>
+
+  <div class="block-title" style="margin-top:18px;">PAR-Q — Questionário de Prontidão para Atividade Física</div>
+  <p class="hint" style="margin-bottom:12px;">Perguntas padrão de triagem antes de iniciar a atividade física.</p>
+  ${PARQ_PERGUNTAS.map(p => `
+    <label class="defic-item" style="cursor:default;margin-bottom:8px;">
+      <div style="flex:1;">
+        <div class="di-title" style="font-weight:500;">${p.texto}</div>
+      </div>
+      <div class="status-row" style="width:auto;margin:6px 0 0;">
+        <button type="button" class="status-btn ok ${an.parq[p.k]==='sim'?'selected':''}" data-parq="${p.k}" data-parqval="sim" style="min-width:70px;flex:none;">Sim</button>
+        <button type="button" class="status-btn restrito ${an.parq[p.k]==='nao'?'selected':''}" data-parq="${p.k}" data-parqval="nao" style="min-width:70px;flex:none;">Não</button>
+      </div>
+    </label>
+  `).join("")}
+  <div class="field"><label>Detalhes de alguma resposta "Sim" (opcional)</label><textarea id="anParqDet" rows="2">${an.parqDetalhes||''}</textarea></div>
+  <label class="defic-item" style="cursor:pointer;">
+    <input type="checkbox" id="alConsentimento" ${an.consentimentoParq ? 'checked' : ''}/>
+    <div>
+      <div class="di-title">Autorizo o uso destas informações para a prescrição do treino</div>
+    </div>
+  </label>
+
   <div class="footer-nav">
     <span></span>
     <button class="btn btn-navy" id="nextTab">Ir para Mapeamento →</button>
@@ -930,15 +963,21 @@ async function gerarTreinoIA(){
     return `- ${d.titulo} (origem: ${d.origem}) — exercícios de referência: ${d.exercicios.map(e=>e.nome+' ('+e.sr+')').join(", ")}`;
   }).join("\n");
 
-  const prompt = `Você é um especialista em treinamento de força e biomecânica corretiva atuando em uma academia de musculação (Skyfit Park Palmeiras). Sua prescrição precisa ser baseada em evidência científica atual (ciência do exercício, força e condicionamento, reabilitação/biomecânica corretiva) — nunca um treino genérico de prateleira.
+  const idade = calcularIdade(state.aluno.dataNasc);
+  const parqPositivos = PARQ_PERGUNTAS.filter(p => state.anamnese.parq[p.k] === "sim").map(p => p.texto);
+  const parqTexto = parqPositivos.length
+    ? `Respostas "Sim" no PAR-Q (triagem de prontidão): ${parqPositivos.join(" | ")}${state.anamnese.parqDetalhes ? " — Detalhes: " + state.anamnese.parqDetalhes : ""}`
+    : "PAR-Q sem respostas positivas.";
 
-Antes de montar o treino, use a ferramenta de busca na web para checar literatura científica e diretrizes atuais — priorize buscar diretamente no PubMed (pubmed.ncbi.nlm.nih.gov) por artigos e revisões relevantes, além de periódicos como Journal of Strength and Conditioning Research, Sports Medicine, British Journal of Sports Medicine, e posicionamentos de ACSM/NSCA — relevantes para: (1) as deficiências biomecânicas identificadas abaixo e as estratégias corretivas com melhor suporte de evidência para cada uma, e (2) a prescrição de volume/intensidade adequada ao objetivo e ao nível de capacidade física do aluno. Faça pesquisas objetivas e pontuais — o foco é embasar decisões práticas, não escrever uma revisão de literatura.
+  const prompt = `Você é um especialista em treinamento de força e biomecânica corretiva atuando em uma academia de musculação (Skyfit Park Palmeiras). Sua prescrição deve seguir princípios sólidos de ciência do exercício, força e condicionamento, e biomecânica corretiva — nunca um treino genérico de prateleira.
 
 Dados do aluno:
 Nome: ${state.aluno.nome || "não informado"}
+Idade: ${idade !== null ? idade + " anos" : "não informada"}
 Objetivo principal: ${state.anamnese.objetivo || "não informado"}
 Limitações/dores: ${state.anamnese.limitacoes || "nenhuma relatada"}
 Restrições médicas: ${state.anamnese.restricoes || "nenhuma"}
+${parqTexto}
 
 Deficiências identificadas no Protocolo de Mapeamento Biomecânico:
 ${deficienciasTexto || "nenhuma deficiência marcada"}
@@ -949,11 +988,11 @@ Capacidade física medida:
 
 Observações do professor: ${state.deficienciaObsExtra || "nenhuma"}
 
-Monte um TREINO DE MUSCULAÇÃO COMPLETO e pronto para aplicar, priorizando a correção das deficiências acima sem perder de vista o objetivo do aluno. Use a capacidade física medida para calibrar volume e carga inicial (ex: menos repetições/séries de força para quem teve baixa capacidade nos testes). Estruture em blocos (ex: Aquecimento/Mobilidade, Bloco Principal, Correção/Ativação, Finalização). Para cada exercício informe: nome, séries, repetições (ou tempo), e uma observação técnica curta quando relevante — e, quando a escolha do exercício vier diretamente de uma evidência específica que você pesquisou, cite a fonte de forma breve na observação (ex: "priorizado por evidência de ativação de glúteo médio superior a variantes tradicionais — estudo em Journal of Strength and Conditioning Research, via PubMed").
+Monte um TREINO DE MUSCULAÇÃO COMPLETO e pronto para aplicar, priorizando a correção das deficiências acima sem perder de vista o objetivo do aluno. Use a idade e a capacidade física medida para calibrar volume e carga inicial (ex: menos repetições/séries de força para quem teve baixa capacidade nos testes ou idade mais avançada). Se houver respostas positivas no PAR-Q, ajuste a prescrição com mais cautela nessa área e sinalize a recomendação de liberação médica antes de iniciar. Estruture em blocos (ex: Aquecimento/Mobilidade, Bloco Principal, Correção/Ativação, Finalização). Para cada exercício informe: nome, séries, repetições (ou tempo), e uma observação técnica curta quando relevante. Seja direto e objetivo — sem citações de artigos, estudos ou periódicos no texto.
 
-Depois de pesquisar e montar o treino, responda com um bloco de texto contendo SOMENTE JSON válido (sem markdown, sem texto antes ou depois), no formato:
+Depois de montar o treino, responda com um bloco de texto contendo SOMENTE JSON válido (sem markdown, sem texto antes ou depois), no formato:
 {
-  "estrategiaCurtoPrazo": "texto de 2-4 frases resumindo a estratégia geral do treino, prioridades, e citando em 1-2 frases em que evidência/diretriz a estratégia se apoiou",
+  "estrategiaCurtoPrazo": "texto de 2-4 frases resumindo a estratégia geral do treino e as prioridades, direto e sem citar fontes/estudos",
   "blocos": [
     {"nome":"Aquecimento / Mobilidade", "exercicios":[{"nome":"...", "sr":"...", "obs":"..."}]},
     {"nome":"Bloco Principal", "exercicios":[...]},
@@ -974,8 +1013,7 @@ Depois de pesquisar e montar o treino, responda com um bloco de texto contendo S
       body: JSON.stringify({
         model:"claude-sonnet-4-6",
         max_tokens:4000,
-        messages:[{role:"user", content: prompt}],
-        tools:[{type:"web_search_20250305", name:"web_search", max_uses:5}]
+        messages:[{role:"user", content: prompt}]
       })
     });
     const data = await response.json();
@@ -983,8 +1021,6 @@ Depois de pesquisar e montar o treino, responda com um bloco de texto contendo S
       console.error(data.error);
       state.treino = {erro:true, mensagem: data.error.message || "Erro na chamada da IA."};
     } else {
-      // Com busca na web habilitada, a resposta pode conter vários blocos
-      // (buscas, resultados, texto). Pegamos apenas os blocos de texto final.
       let text = (data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("");
       text = text.replace(/```json|```/g,"").trim();
       // fallback: se ainda vier algo antes/depois do JSON, extrai só o objeto {...}
@@ -992,6 +1028,7 @@ Depois de pesquisar e montar o treino, responda com um bloco de texto contendo S
       if (match) text = match[0];
       const parsed = JSON.parse(text);
       state.treino = parsed;
+      registrarUsoIA();
     }
   }catch(e){
     console.error(e);
@@ -1288,7 +1325,7 @@ function getAtendimentoId(){
   return state.atendimentoId;
 }
 
-async function salvarAtendimento(){
+async function salvarAtendimento(silencioso){
   const registro = {
     id: getAtendimentoId(),
     aluno: state.aluno,
@@ -1299,25 +1336,85 @@ async function salvarAtendimento(){
     deficienciaObsExtra: state.deficienciaObsExtra,
     treino: state.treino,
     professor: state.professor,
-    criadoEm: new Date().toISOString()
+    criadoEm: state.criadoEmOriginal || new Date().toISOString(),
+    atualizadoEm: new Date().toISOString()
   };
+  if (!state.criadoEmOriginal) state.criadoEmOriginal = registro.criadoEm;
   try{
     if (firebaseReady && db){
-      await db.collection("atendimentos").add(registro);
+      const existente = await db.collection("atendimentos").where("id","==",registro.id).limit(1).get();
+      if (!existente.empty){
+        await existente.docs[0].ref.set(registro);
+      } else {
+        await db.collection("atendimentos").add(registro);
+      }
     } else {
       const key = "skyfit_atendimentos";
       const arr = JSON.parse(localStorage.getItem(key) || "[]");
-      arr.push(registro);
+      const idx = arr.findIndex(a=>a.id===registro.id);
+      if (idx >= 0) arr[idx] = registro; else arr.push(registro);
       localStorage.setItem(key, JSON.stringify(arr));
     }
     state.saveStatus = "ok";
     state.saveError = "";
+    state.ultimoAutosave = new Date();
   }catch(e){
     console.error(e);
     state.saveStatus = "err";
     state.saveError = e && e.message ? e.message : "falha desconhecida";
   }
+  if (!silencioso) render();
+}
+
+/* ---------- AUTOSALVAMENTO (rascunho a cada 60s, silencioso) ---------- */
+setInterval(()=>{
+  if (state.screen === "app" && state.aluno && state.aluno.nome && state.aluno.nome.trim()){
+    salvarAtendimento(true);
+  }
+}, 60000);
+
+/* ---------- CARREGAR ATENDIMENTO PARA EDIÇÃO ---------- */
+function carregarParaEdicao(a){
+  state.aluno = a.aluno || state.aluno;
+  state.anamnese = a.anamnese || state.anamnese;
+  state.testes = a.testes || state.testes;
+  state.squat = a.squat || state.squat;
+  state.deficienciasSelecionadas = {};
+  (a.deficiencias||[]).forEach(k => state.deficienciasSelecionadas[k] = true);
+  state.deficienciaObsExtra = a.deficienciaObsExtra || "";
+  state.treino = a.treino || null;
+  state.atendimentoId = a.id;
+  state.criadoEmOriginal = a.criadoEm || null;
+  state.saveStatus = "";
+  state.saveError = "";
+  state.alunoSelecionado = null;
+  state.tab = 1;
+  toast("Atendimento carregado — edite e salve de novo na aba Fechamento.");
   render();
+}
+
+/* ---------- CONTADOR DE USO DA IA (acompanhamento de custo) ---------- */
+async function registrarUsoIA(){
+  try{
+    if (firebaseReady && db){
+      await db.collection("uso_ia").add({ criadoEm: new Date().toISOString(), professor: state.professor || "" });
+    } else {
+      const arr = JSON.parse(localStorage.getItem("skyfit_uso_ia") || "[]");
+      arr.push({ criadoEm: new Date().toISOString(), professor: state.professor || "" });
+      localStorage.setItem("skyfit_uso_ia", JSON.stringify(arr));
+    }
+  }catch(e){ console.error("Falha ao registrar uso da IA (não afeta o treino gerado):", e); }
+}
+
+async function carregarUsoIA(){
+  try{
+    if (firebaseReady && db){
+      const snap = await db.collection("uso_ia").get();
+      return snap.docs.map(d=>d.data());
+    } else {
+      return JSON.parse(localStorage.getItem("skyfit_uso_ia") || "[]");
+    }
+  }catch(e){ console.error(e); return []; }
 }
 
 /* ---------- ESTATÍSTICAS ---------- */
@@ -1358,6 +1455,26 @@ function formatarDataBR(isoStr){
   const [y,m,d] = isoStr.split("-");
   return `${d}/${m}/${y}`;
 }
+function calcularIdade(isoStrNasc){
+  if (!isoStrNasc) return null;
+  const nasc = new Date(isoStrNasc+"T00:00:00");
+  if (isNaN(nasc.getTime())) return null;
+  const hoje = new Date();
+  let idade = hoje.getFullYear() - nasc.getFullYear();
+  const m = hoje.getMonth() - nasc.getMonth();
+  if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) idade--;
+  return idade >= 0 && idade < 130 ? idade : null;
+}
+
+const PARQ_PERGUNTAS = [
+  {k:"q1", texto:"Algum médico já disse que você possui um problema de coração e recomendou que só praticasse atividade física sob prescrição médica?"},
+  {k:"q2", texto:"Você sente dores no peito quando pratica atividade física?"},
+  {k:"q3", texto:"No último mês, você sentiu dores no peito quando não estava praticando atividade física?"},
+  {k:"q4", texto:"Você perde o equilíbrio devido à tontura ou perda de consciência?"},
+  {k:"q5", texto:"Você possui algum problema ósseo ou articular que poderia ser agravado por uma mudança na sua atividade física?"},
+  {k:"q6", texto:"Algum médico já recomendou o uso de medicamentos para pressão arterial ou problema cardíaco?"},
+  {k:"q7", texto:"Você conhece alguma outra razão pela qual não deveria praticar atividade física?"}
+];
 
 function tabAlunos(){
   if (state.alunoSelecionado) {
@@ -1372,6 +1489,7 @@ function tabAlunos(){
       <div style="font-weight:800;color:var(--navy);font-size:16px;">${a.aluno?.nome || "-"}</div>
       <div style="color:var(--muted);font-size:12.5px;">Atendimento em ${formatarDataBR(a.aluno?.data)} — Professor: ${a.professor || "-"}</div>
     </div>
+    <button class="btn btn-outline" style="margin-top:10px;width:auto;padding:9px 16px;font-size:12.5px;" onclick="carregarParaEdicao(state.alunoSelecionado)">✏️ Editar este atendimento</button>
 
     <div class="block-title" style="margin-top:16px;">Anamnese</div>
     <p><b>Objetivo:</b> ${a.anamnese?.objetivo || "-"}</p>
@@ -1449,6 +1567,7 @@ async function abrirEstatisticas(){
   state.statsLoading = true;
   render();
   const registros = await carregarAtendimentos();
+  const usoIA = await carregarUsoIA();
 
   const porProfessor = {};
   const porMes = {};
@@ -1464,6 +1583,7 @@ async function abrirEstatisticas(){
   const hoje = new Date();
   const mkAtual = mesAno(hoje.toISOString());
   const atendimentosEsteMes = porMes[mkAtual] || 0;
+  const treinosIAEsteMes = usoIA.filter(u => mesAno(u.criadoEm || new Date().toISOString()) === mkAtual).length;
 
   const recentes = [...registros]
     .sort((a,b)=> new Date(b.criadoEm||0) - new Date(a.criadoEm||0))
@@ -1473,6 +1593,8 @@ async function abrirEstatisticas(){
     total: registros.length,
     esteMes: atendimentosEsteMes,
     alunosUnicos: alunosSet.size,
+    treinosIATotal: usoIA.length,
+    treinosIAEsteMes,
     porProfessor,
     porMes,
     recentes
@@ -1519,6 +1641,10 @@ function tabEstatisticas(){
       <div style="font-size:26px;font-weight:800;color:var(--ok);">${s.alunosUnicos}</div>
       <div>Alunos distintos avaliados</div>
     </div>
+    <div class="summary-mini" style="text-align:center;">
+      <div style="font-size:26px;font-weight:800;color:var(--gold);">${s.treinosIAEsteMes}</div>
+      <div>Treinos gerados pela IA este mês <span class="hint" style="display:block;font-size:10.5px;margin-top:2px;">(${s.treinosIATotal} no total — use pra acompanhar o gasto na Anthropic)</span></div>
+    </div>
   </div>
 
   <div class="block-title">Atendimentos por Professor</div>
@@ -1557,10 +1683,73 @@ function tabEstatisticas(){
   `).join("")}
 
   <button class="btn btn-outline" id="btnRecarregarStats" style="margin-top:14px;width:100%;">↻ Atualizar</button>
+
+  <div class="block-title" style="margin-top:28px;color:var(--restrito);">⚠️ Zona de Risco — Administrador</div>
+  <div class="summary-mini" style="border:1.5px solid var(--restrito);">
+    <p class="hint" style="margin:0 0 12px;">Baixe um backup dos dados a qualquer momento, ou apague tudo (atendimentos + avaliações) para começar do zero. Recomendado: sempre baixe o backup antes de resetar.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-outline" id="btnBackupAvulso" style="width:auto;padding:9px 16px;font-size:12.5px;">⬇️ Baixar backup agora</button>
+      <button class="btn btn-outline" id="btnResetTudo" style="width:auto;padding:9px 16px;font-size:12.5px;color:var(--restrito);border-color:var(--restrito);">🗑️ Resetar tudo</button>
+    </div>
+  </div>
   `;
 }
 
 /* ---------- AVALIAÇÕES (ADMIN) ---------- */
+/* ---------- BACKUP E RESET (ADMIN) ---------- */
+async function baixarBackup(){
+  toast("Preparando backup...");
+  const atendimentos = await carregarAtendimentos();
+  const avaliacoes = await carregarAvaliacoes();
+  const pacote = {
+    geradoEm: new Date().toISOString(),
+    origem: firebaseReady ? "firebase" : "localStorage-deste-aparelho",
+    atendimentos,
+    avaliacoes
+  };
+  const blob = new Blob([JSON.stringify(pacote, null, 2)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `backup_skyfit_mapeamento_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast("Backup baixado.");
+}
+
+async function resetarTudo(){
+  if (!confirm("Isso vai APAGAR todos os atendimentos e avaliações salvos (nuvem ou deste aparelho). Um backup será baixado automaticamente antes. Quer continuar?")) return;
+  if (!confirm("Tem certeza mesmo? Essa ação não pode ser desfeita depois de confirmar.")) return;
+
+  await baixarBackup();
+
+  try{
+    if (firebaseReady && db){
+      const colecoes = ["atendimentos", "avaliacoes"];
+      for (const nome of colecoes){
+        const snap = await db.collection(nome).get();
+        const docs = snap.docs;
+        for (let i = 0; i < docs.length; i += 450){
+          const lote = docs.slice(i, i+450);
+          const batch = db.batch();
+          lote.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      }
+    } else {
+      localStorage.removeItem("skyfit_atendimentos");
+      localStorage.removeItem("skyfit_avaliacoes");
+    }
+    toast("Tudo apagado. Começando do zero.");
+    state.statsData = null;
+    state.avaliacoesData = null;
+    abrirEstatisticas();
+  }catch(e){
+    console.error(e);
+    toast("Erro ao resetar: " + (e && e.message ? e.message : "falha desconhecida"));
+  }
+}
+
 async function carregarAvaliacoes(){
   try{
     if (firebaseReady && db){
@@ -1584,7 +1773,8 @@ async function abrirAvaliacoes(){
   const total = dados.length;
   const media = total ? (dados.reduce((s,d)=>s+(d.nota||0),0)/total).toFixed(1) : "-";
   const claros = total ? Math.round(dados.filter(d=>d.clareza==="sim").length/total*100) : 0;
-  const entenderam = total ? Math.round(dados.filter(d=>d.entendimento==="sim").length/total*100) : 0;
+  const comMotivacao = dados.filter(d=>d.motivacao !== undefined && d.motivacao !== null);
+  const mediaMotivacao = comMotivacao.length ? (comMotivacao.reduce((s,d)=>s+(d.motivacao||0),0)/comMotivacao.length).toFixed(1) : "-";
 
   const comRecepcao = dados.filter(d=>d.notaRecepcao);
   const mediaRecepcao = comRecepcao.length ? (comRecepcao.reduce((s,d)=>s+(d.notaRecepcao||0),0)/comRecepcao.length).toFixed(1) : "-";
@@ -1601,7 +1791,7 @@ async function abrirAvaliacoes(){
     .map(([prof,v])=>({professor:prof, media:(v.soma/v.count).toFixed(1), total:v.count}))
     .sort((a,b)=>b.media-a.media);
 
-  state.avaliacoesData = { dados: [...dados].sort((a,b)=>new Date(b.criadoEm||0)-new Date(a.criadoEm||0)), total, media, claros, entenderam, rankingProfessores, mediaRecepcao, bemRecebidos, totalComRecepcao: comRecepcao.length };
+  state.avaliacoesData = { dados: [...dados].sort((a,b)=>new Date(b.criadoEm||0)-new Date(a.criadoEm||0)), total, media, claros, mediaMotivacao, rankingProfessores, mediaRecepcao, bemRecebidos, totalComRecepcao: comRecepcao.length };
   state.avaliacoesLoading = false;
   render();
 }
@@ -1635,8 +1825,8 @@ function tabAvaliacoes(){
       <div>Disseram que o professor foi claro</div>
     </div>
     <div class="summary-mini" style="text-align:center;">
-      <div style="font-size:26px;font-weight:800;color:var(--ok);">${a.entenderam}%</div>
-      <div>Entenderam o treino recomendado</div>
+      <div style="font-size:26px;font-weight:800;color:var(--ok);">${a.mediaMotivacao}</div>
+      <div>Motivação média para começar (0-10)</div>
     </div>
   </div>
 
@@ -1671,7 +1861,7 @@ function tabAvaliacoes(){
     <div class="exercise-card" style="align-items:flex-start;">
       <div>
         <div class="ex-name">${"★".repeat(d.nota||0)}${"☆".repeat(5-(d.nota||0))} — Professor: ${d.professorAtendimento||"-"}</div>
-        <div class="ex-meta">Claro: ${d.clareza==="sim"?"Sim":"Não"} • Entendeu o treino: ${d.entendimento==="sim"?"Sim":"Não"} • ${d.criadoEm ? new Date(d.criadoEm).toLocaleDateString('pt-BR') : ""}</div>
+        <div class="ex-meta">Claro: ${d.clareza==="sim"?"Sim":"Não"} • Motivação: ${d.motivacao !== undefined && d.motivacao !== null ? d.motivacao+"/10" : "-"} • ${d.criadoEm ? new Date(d.criadoEm).toLocaleDateString('pt-BR') : ""}</div>
         ${d.notaRecepcao ? `<div class="ex-meta">Recepção: ${"★".repeat(d.notaRecepcao)} • Bem recebido: ${d.recepcao==="sim"?"Sim":"Não"}</div>` : ""}
         ${d.comentario ? `<div class="ex-meta" style="margin-top:4px;font-style:italic;">"${d.comentario}"</div>` : ""}
       </div>
@@ -1697,6 +1887,8 @@ function attachAppEvents(){
   const bindText = (id, obj, key)=>{ const el=document.getElementById(id); if(el) el.oninput = ()=> obj[key]=el.value; };
   bindText("alNome", state.aluno, "nome");
   bindText("alData", state.aluno, "data");
+  const alDataNasc = document.getElementById("alDataNasc");
+  if (alDataNasc) alDataNasc.onchange = ()=>{ state.aluno.dataNasc = alDataNasc.value; render(); };
   const alPrimeiro = document.getElementById("alPrimeiro");
   if (alPrimeiro) alPrimeiro.onchange = ()=> state.aluno.primeiroAtendimento = alPrimeiro.checked;
   bindText("anHist", state.anamnese, "historico");
@@ -1704,11 +1896,22 @@ function attachAppEvents(){
   bindText("anCir", state.anamnese, "cirurgias");
   bindText("anRes", state.anamnese, "restricoes");
   bindText("anObj", state.anamnese, "objetivo");
+  bindText("anParqDet", state.anamnese, "parqDetalhes");
+  document.querySelectorAll("[data-parq]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const k = btn.dataset.parq, v = btn.dataset.parqval;
+      state.anamnese.parq[k] = (state.anamnese.parq[k]===v) ? "" : v;
+      render();
+    };
+  });
+  const alConsentimento = document.getElementById("alConsentimento");
+  if (alConsentimento) alConsentimento.onchange = ()=> state.anamnese.consentimentoParq = alConsentimento.checked;
 
   // Tab 1
   document.querySelectorAll(".status-btn").forEach(btn=>{
     btn.onclick = ()=>{
       const key = btn.dataset.test, status = btn.dataset.status;
+      if (!key) return; // botão de outra seção (ex: PAR-Q), já tem handler próprio
       state.testes[key].status = (state.testes[key].status===status) ? "" : status;
       render();
     };
@@ -1826,6 +2029,12 @@ function attachAppEvents(){
   const btnRecarregarStats = document.getElementById("btnRecarregarStats");
   if (btnRecarregarStats) btnRecarregarStats.onclick = ()=>{ state.statsData = null; abrirEstatisticas(); };
 
+  const btnBackupAvulso = document.getElementById("btnBackupAvulso");
+  if (btnBackupAvulso) btnBackupAvulso.onclick = ()=> baixarBackup();
+
+  const btnResetTudo = document.getElementById("btnResetTudo");
+  if (btnResetTudo) btnResetTudo.onclick = ()=> resetarTudo();
+
   // Tab 7 - Avaliações (admin)
   const btnRecarregarAval = document.getElementById("btnRecarregarAval");
   if (btnRecarregarAval) btnRecarregarAval.onclick = ()=>{ state.avaliacoesData = null; abrirAvaliacoes(); };
@@ -1917,9 +2126,24 @@ async function renderPdfPublico(id){
   };
 }
 
+async function avaliacaoJaExiste(id){
+  try{
+    if (firebaseReady && db){
+      const snap = await db.collection("avaliacoes").where("atendimentoId","==",id).limit(1).get();
+      return !snap.empty;
+    } else {
+      return !!localStorage.getItem("avaliado_"+id);
+    }
+  }catch(e){ console.error(e); return !!localStorage.getItem("avaliado_"+id); }
+}
+
 async function renderAvaliacaoPublica(id){
-  const jaAvaliou = localStorage.getItem("avaliado_"+id);
   const root = document.getElementById("root");
+  root.innerHTML = `
+  <div class="login-wrap"><div class="login-card" style="text-align:center;">
+    <div class="spinner"></div>
+  </div></div>`;
+  const jaAvaliou = await avaliacaoJaExiste(id);
   if (jaAvaliou){
     root.innerHTML = `
     <div class="login-wrap"><div class="login-card" style="text-align:center;">
@@ -1928,15 +2152,12 @@ async function renderAvaliacaoPublica(id){
     </div></div>`;
     return;
   }
-  root.innerHTML = `
-  <div class="login-wrap"><div class="login-card" style="text-align:center;">
-    <div class="spinner"></div>
-  </div></div>`;
   const info = await buscarAtendimentoPorId(id);
 
   root.innerHTML = `
   <div class="login-wrap"><div class="login-card">
     <h1>Avalie seu atendimento</h1>
+
     <p class="sub" style="text-transform:none;letter-spacing:0;">Skyfit Park Palmeiras • Resposta 100% anônima</p>
     <div class="field">
       <label>Nota geral do atendimento com o professor</label>
@@ -1952,10 +2173,10 @@ async function renderAvaliacaoPublica(id){
       </div>
     </div>
     <div class="field">
-      <label>Você entendeu o treino recomendado?</label>
-      <div class="status-row">
-        <button class="status-btn ok" data-field="entendimento" data-value="sim">Sim</button>
-        <button class="status-btn restrito" data-field="entendimento" data-value="nao">Não</button>
+      <label>De 0 a 10, qual seu nível de motivação para começar essa nova jornada?</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
+        <input type="range" id="motivacaoSlider" min="0" max="10" step="1" value="5" style="flex:1;"/>
+        <span id="motivacaoValor" style="font-weight:800;color:var(--navy);font-size:20px;min-width:28px;text-align:center;">5</span>
       </div>
     </div>
     ${info.primeiroAtendimento ? `
@@ -1974,14 +2195,20 @@ async function renderAvaliacaoPublica(id){
     </div>
     ` : ""}
     <div class="field">
-      <label>Comentário (opcional)</label>
-      <textarea id="avComentario" rows="3" placeholder="Se quiser, deixe um comentário..."></textarea>
+      <label>Deixe um comentário ou sugestão de melhoria (opcional)</label>
+      <textarea id="avComentario" rows="3" placeholder="Se quiser, deixe um comentário ou sugestão..."></textarea>
     </div>
     <div class="err" id="avErr"></div>
     <button class="btn btn-primary" id="btnEnviarAvaliacao">Enviar avaliação</button>
   </div></div>`;
 
-  const respostas = {nota:0, clareza:"", entendimento:"", notaRecepcao:0, recepcao:""};
+  const respostas = {nota:0, clareza:"", motivacao:5, notaRecepcao:0, recepcao:""};
+  const motivacaoSlider = document.getElementById("motivacaoSlider");
+  const motivacaoValor = document.getElementById("motivacaoValor");
+  if (motivacaoSlider) motivacaoSlider.oninput = ()=>{
+    respostas.motivacao = parseInt(motivacaoSlider.value);
+    motivacaoValor.textContent = motivacaoSlider.value;
+  };
   document.querySelectorAll("#starsRow span").forEach(s=>{
     s.onclick = ()=>{
       respostas.nota = parseInt(s.dataset.star);
@@ -2013,14 +2240,14 @@ async function renderAvaliacaoPublica(id){
   document.getElementById("btnEnviarAvaliacao").onclick = async ()=>{
     const err = document.getElementById("avErr");
     if (!respostas.nota){ err.textContent = "Dê uma nota antes de enviar."; return; }
-    if (!respostas.clareza || !respostas.entendimento){ err.textContent = "Responda as duas perguntas de sim/não sobre o professor."; return; }
+    if (!respostas.clareza){ err.textContent = "Responda se o professor explicou tudo com clareza."; return; }
     if (info.primeiroAtendimento && (!respostas.notaRecepcao || !respostas.recepcao)){ err.textContent = "Responda também as perguntas sobre a recepção."; return; }
     const comentario = document.getElementById("avComentario").value.trim();
     const registro = {
       atendimentoId: id,
       nota: respostas.nota,
       clareza: respostas.clareza,
-      entendimento: respostas.entendimento,
+      motivacao: respostas.motivacao,
       notaRecepcao: info.primeiroAtendimento ? respostas.notaRecepcao : null,
       recepcao: info.primeiroAtendimento ? respostas.recepcao : null,
       comentario,
