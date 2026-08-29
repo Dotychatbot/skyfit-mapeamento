@@ -392,7 +392,7 @@ const state = {
   role: "professor",
   activeTab: 0,
   atendimentoId: null,
-  aluno: {nome:"", dataNasc:"", data: new Date().toISOString().slice(0,10), primeiroAtendimento: false},
+  aluno: {nome:"", sexo:"", dataNasc:"", data: new Date().toISOString().slice(0,10), primeiroAtendimento: false},
   anamnese: {historico:"", limitacoes:"", cirurgias:"", restricoes:"", objetivo:"", parq:{q1:"",q2:"",q3:"",q4:"",q5:"",q6:"",q7:""}, parqDetalhes:"", consentimentoParq:false},
   testes: {
     tornozelo:{status:"", obs:""},
@@ -738,6 +738,13 @@ function tabAnamnese(){
       <input value="${idade !== null ? idade + ' anos' : '—'}" disabled style="background:#f3f5f9;color:var(--muted);"/>
     </div>
   </div>
+  <div class="field">
+    <label>Sexo do aluno</label>
+    <div class="status-row" style="width:auto;">
+      <button type="button" class="status-btn ok ${a.sexo==='masculino'?'selected':''}" data-sexo="masculino">Masculino</button>
+      <button type="button" class="status-btn ok ${a.sexo==='feminino'?'selected':''}" data-sexo="feminino">Feminino</button>
+    </div>
+  </div>
   <label class="defic-item" style="cursor:pointer;">
     <input type="checkbox" id="alPrimeiro" ${a.primeiroAtendimento ? 'checked' : ''}/>
     <div>
@@ -973,6 +980,7 @@ async function gerarTreinoIA(){
 
 Dados do aluno:
 Nome: ${state.aluno.nome || "não informado"}
+Sexo: ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'não informado'}
 Idade: ${idade !== null ? idade + " anos" : "não informada"}
 Objetivo principal: ${state.anamnese.objetivo || "não informado"}
 Limitações/dores: ${state.anamnese.limitacoes || "nenhuma relatada"}
@@ -1108,6 +1116,7 @@ function tabFechamento(){
 
   <div class="summary-mini">
     <div><b>Aluno:</b> ${state.aluno.nome || "—"}</div>
+    <div><b>Sexo:</b> ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'—'}</div>
     <div><b>Avaliador:</b> ${state.professor}</div>
     <div><b>Data:</b> ${state.aluno.data}</div>
   </div>
@@ -1164,7 +1173,7 @@ function tabFechamento(){
 function gerarResumoTexto(){
   const selecionadas = Object.keys(state.deficienciasSelecionadas).filter(k=>state.deficienciasSelecionadas[k]);
   let txt = `PROTOCOLO DE MAPEAMENTO BIOMECÂNICO — SKY FIT ACADEMIA\n\n`;
-  txt += `Aluno: ${state.aluno.nome}\nAvaliador: ${state.professor}\nData: ${state.aluno.data}\n\n`;
+  txt += `Aluno: ${state.aluno.nome}\nSexo: ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'-'}\nAvaliador: ${state.professor}\nData: ${state.aluno.data}\n\n`;
   txt += `-- ANAMNESE --\nHistórico: ${state.anamnese.historico}\nLimitações: ${state.anamnese.limitacoes}\nCirurgias: ${state.anamnese.cirurgias}\nRestrições: ${state.anamnese.restricoes}\nObjetivo: ${state.anamnese.objetivo}\n\n`;
   txt += `-- DEFICIÊNCIAS IDENTIFICADAS --\n`;
   selecionadas.forEach(k=> txt += `- ${BASE_DEFICIENCIAS[k].titulo}\n`);
@@ -1204,6 +1213,7 @@ function gerarPDF(incluirTreino, dadosOverride){
 
   doc.setFontSize(11); doc.setTextColor(20,20,20);
   doc.text(`Aluno: ${d.aluno.nome || "-"}`, 14, y); y+=6;
+  doc.text(`Sexo: ${d.aluno.sexo==='masculino'?'Masculino':d.aluno.sexo==='feminino'?'Feminino':'-'}`, 14, y); y+=6;
   doc.text(`Avaliador: ${d.professor}`, 14, y); y+=6;
   doc.text(`Data: ${d.aluno.data}`, 14, y); y+=10;
 
@@ -1797,18 +1807,31 @@ async function abrirAvaliacoes(){
 }
 
 function tabAvaliacoes(){
+  const isAdmin = state.role === "admin";
   if (state.avaliacoesLoading || !state.avaliacoesData){
     if (!state.avaliacoesLoading) abrirAvaliacoes();
     return `
-    <h2>Avaliações dos Alunos</h2>
-    <p class="desc">Acesso restrito ao administrador. Respostas anônimas, sem vínculo com o nome do aluno.</p>
+    <h2>${isAdmin ? "Avaliações dos Alunos" : "Minhas Avaliações"}</h2>
+    <p class="desc">${isAdmin ? "Acesso restrito ao administrador. Respostas anônimas, sem vínculo com o nome do aluno." : "Suas avaliações recebidas dos alunos. Respostas anônimas, sem vínculo com o nome do aluno."}</p>
     <div class="ai-box"><div class="spinner"></div><p style="color:var(--muted);font-size:13px;margin:0;">Carregando...</p></div>`;
   }
-  const a = state.avaliacoesData;
+  const aFull = state.avaliacoesData;
+  // Para professores (não-admin), restringe tudo às avaliações do próprio professor logado
+  const dados = isAdmin ? aFull.dados : aFull.dados.filter(d => (d.professorAtendimento||"") === state.professor);
+  const total = dados.length;
+  const media = total ? (dados.reduce((s,d)=>s+(d.nota||0),0)/total).toFixed(1) : "-";
+  const claros = total ? Math.round(dados.filter(d=>d.clareza==="sim").length/total*100) : 0;
+  const comMotivacao = dados.filter(d=>d.motivacao !== undefined && d.motivacao !== null);
+  const mediaMotivacao = comMotivacao.length ? (comMotivacao.reduce((s,d)=>s+(d.motivacao||0),0)/comMotivacao.length).toFixed(1) : "-";
+  const comRecepcao = dados.filter(d=>d.notaRecepcao);
+  const mediaRecepcao = comRecepcao.length ? (comRecepcao.reduce((s,d)=>s+(d.notaRecepcao||0),0)/comRecepcao.length).toFixed(1) : "-";
+  const bemRecebidos = comRecepcao.length ? Math.round(comRecepcao.filter(d=>d.recepcao==="sim").length/comRecepcao.length*100) : 0;
+  const a = { dados, total, media, claros, mediaMotivacao, mediaRecepcao, bemRecebidos, totalComRecepcao: comRecepcao.length, rankingProfessores: aFull.rankingProfessores };
+
   const avisoErro = state.firestoreErro ? `<div class="err" style="display:block;margin-bottom:14px;">⚠️ Erro ao ler a nuvem: ${state.firestoreErro}. Provavelmente as regras do Firestore ainda não estão liberadas — confira em Firestore Database → Regras se está publicado "allow read, write: if true;".</div>` : "";
   return `
-  <h2>Avaliações dos Alunos</h2>
-  <p class="desc">Respostas 100% anônimas — vinculadas apenas ao atendimento, nunca ao nome do aluno. Só o administrador acessa esta aba.</p>
+  <h2>${isAdmin ? "Avaliações dos Alunos" : "Minhas Avaliações"}</h2>
+  <p class="desc">${isAdmin ? "Respostas 100% anônimas — vinculadas apenas ao atendimento, nunca ao nome do aluno. Só o administrador acessa esta aba." : "Respostas 100% anônimas dos seus atendimentos — vinculadas apenas ao atendimento, nunca ao nome do aluno."}</p>
   ${avisoErro}
 
   <div class="grid2" style="margin-bottom:20px;">
@@ -1843,6 +1866,7 @@ function tabAvaliacoes(){
     </div>
   </div>`}
 
+  ${isAdmin ? `
   <div class="block-title">Nota Média por Professor</div>
   ${(!a.rankingProfessores || a.rankingProfessores.length===0) ? `<p class="hint">Sem dados suficientes ainda.</p>` : a.rankingProfessores.map(r=>`
     <div style="margin-bottom:10px;">
@@ -1854,13 +1878,13 @@ function tabAvaliacoes(){
         <div style="width:${(r.media/5*100)}%;height:100%;background:linear-gradient(90deg,var(--gold),var(--red-dark));"></div>
       </div>
     </div>
-  `).join("")}
+  `).join("")}` : ""}
 
-  <div class="block-title">Respostas Individuais</div>
+  <div class="block-title">${isAdmin ? "Respostas Individuais" : "Minhas Respostas Individuais"}</div>
   ${a.dados.length===0 ? `<p class="hint">Nenhuma avaliação recebida ainda.</p>` : a.dados.map(d=>`
     <div class="exercise-card" style="align-items:flex-start;">
       <div>
-        <div class="ex-name">${"★".repeat(d.nota||0)}${"☆".repeat(5-(d.nota||0))} — Professor: ${d.professorAtendimento||"-"}</div>
+        <div class="ex-name">${"★".repeat(d.nota||0)}${"☆".repeat(5-(d.nota||0))}${isAdmin ? " — Professor: " + (d.professorAtendimento||"-") : ""}</div>
         <div class="ex-meta">Claro: ${d.clareza==="sim"?"Sim":"Não"} • Motivação: ${d.motivacao !== undefined && d.motivacao !== null ? d.motivacao+"/10" : "-"} • ${d.criadoEm ? new Date(d.criadoEm).toLocaleDateString('pt-BR') : ""}</div>
         ${d.notaRecepcao ? `<div class="ex-meta">Recepção: ${"★".repeat(d.notaRecepcao)} • Bem recebido: ${d.recepcao==="sim"?"Sim":"Não"}</div>` : ""}
         ${d.comentario ? `<div class="ex-meta" style="margin-top:4px;font-style:italic;">"${d.comentario}"</div>` : ""}
@@ -1891,6 +1915,13 @@ function attachAppEvents(){
   if (alDataNasc) alDataNasc.onchange = ()=>{ state.aluno.dataNasc = alDataNasc.value; render(); };
   const alPrimeiro = document.getElementById("alPrimeiro");
   if (alPrimeiro) alPrimeiro.onchange = ()=> state.aluno.primeiroAtendimento = alPrimeiro.checked;
+  document.querySelectorAll("[data-sexo]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const v = btn.dataset.sexo;
+      state.aluno.sexo = (state.aluno.sexo===v) ? "" : v;
+      render();
+    };
+  });
   bindText("anHist", state.anamnese, "historico");
   bindText("anLim", state.anamnese, "limitacoes");
   bindText("anCir", state.anamnese, "cirurgias");
@@ -1908,10 +1939,10 @@ function attachAppEvents(){
   if (alConsentimento) alConsentimento.onchange = ()=> state.anamnese.consentimentoParq = alConsentimento.checked;
 
   // Tab 1
-  document.querySelectorAll(".status-btn").forEach(btn=>{
+  document.querySelectorAll(".status-btn:not([data-parq]):not([data-sexo])").forEach(btn=>{
     btn.onclick = ()=>{
       const key = btn.dataset.test, status = btn.dataset.status;
-      if (!key) return; // botão de outra seção (ex: PAR-Q), já tem handler próprio
+      if (!key) return; // botão de outra seção, já tem handler próprio
       state.testes[key].status = (state.testes[key].status===status) ? "" : status;
       render();
     };
