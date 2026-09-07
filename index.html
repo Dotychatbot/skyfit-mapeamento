@@ -28,6 +28,12 @@
   }
   *{box-sizing:border-box;}
   html, body{ overscroll-behavior-y: contain; }
+  .badge-novidade{
+    display:inline-block; min-width:16px; height:16px; padding:0 4px;
+    background:var(--red); color:#fff; border-radius:9px;
+    font-size:10px; font-weight:700; line-height:16px; text-align:center;
+    margin-left:5px; vertical-align:middle;
+  }
   body{
     margin:0;
     font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
@@ -425,7 +431,10 @@ const state = {
   alunoSelecionado:null,
   recadosData:null,
   recadosLoading:false,
-  recadoEnviando:false
+  recadoEnviando:false,
+  recadosNovidades:0,
+  avaliacoesNovidades:0,
+  recadoRespondendo:null
 };
 
 const TABS_BASE = ["Protocolos","Anamnese","Mapeamento","Deficiências","Treino (IA)","Fechamento","Alunos","Recados"];
@@ -524,6 +533,7 @@ function attachLogin(){
       state.screen = "app";
       salvarSessao();
       render();
+      atualizarContadoresNovidade();
       return;
     }
     if (senha !== SENHA_PADRAO){ err.textContent = "Senha incorreta."; return; }
@@ -532,6 +542,7 @@ function attachLogin(){
     state.screen = "app";
     salvarSessao();
     render();
+    atualizarContadoresNovidade();
   };
 }
 
@@ -546,7 +557,11 @@ function renderApp(){
   </div>
   <div class="app">
     <div class="tabs">
-      ${currentTabs().map((t,i)=>`<div class="tab ${state.activeTab===i?'active':''}" data-tab="${i}"><span class="num">${i+1}</span>${t}</div>`).join("")}
+      ${currentTabs().map((t,i)=>{
+        const badgeCount = t === "Recados" ? state.recadosNovidades : (t === "Avaliações" ? state.avaliacoesNovidades : 0);
+        const badge = badgeCount > 0 ? `<span class="badge-novidade">${badgeCount > 9 ? "9+" : badgeCount}</span>` : "";
+        return `<div class="tab ${state.activeTab===i?'active':''}" data-tab="${i}"><span class="num">${i+1}</span>${t}${badge}</div>`;
+      }).join("")}
     </div>
     <div class="panel">${renderTab(state.activeTab)}</div>
   </div>
@@ -1936,6 +1951,8 @@ async function abrirAvaliacoes(){
 
   state.avaliacoesData = { dados: [...dados].sort((a,b)=>new Date(b.criadoEm||0)-new Date(a.criadoEm||0)), total, media, claros, mediaMotivacao, rankingProfessores, mediaRecepcao, bemRecebidos, totalComRecepcao: comRecepcao.length };
   state.avaliacoesLoading = false;
+  state.avaliacoesNovidades = 0;
+  marcarComoVisto("avaliacoes");
   render();
 }
 
@@ -2029,6 +2046,31 @@ function tabAvaliacoes(){
   `;
 }
 
+/* ---------- CONTADOR DE NOVIDADES (recados / avaliações) ---------- */
+function getUltimoVisto(tipo){
+  try{ return localStorage.getItem(`skyfit_ultimovisto_${tipo}_${state.professor}`) || null; }
+  catch(e){ return null; }
+}
+function marcarComoVisto(tipo){
+  try{ localStorage.setItem(`skyfit_ultimovisto_${tipo}_${state.professor}`, new Date().toISOString()); }
+  catch(e){}
+}
+async function atualizarContadoresNovidade(){
+  try{
+    const recados = await carregarRecados();
+    const ultimoRecados = getUltimoVisto("recados");
+    state.recadosNovidades = recados.filter(r => r.autor !== state.professor && (!ultimoRecados || new Date(r.criadoEm) > new Date(ultimoRecados))).length;
+  }catch(e){ console.error(e); }
+  if (state.role === "admin"){
+    try{
+      const avaliacoes = await carregarAvaliacoes();
+      const ultimoAval = getUltimoVisto("avaliacoes");
+      state.avaliacoesNovidades = avaliacoes.filter(a => (!ultimoAval || new Date(a.criadoEm) > new Date(ultimoAval))).length;
+    }catch(e){ console.error(e); }
+  }
+  render();
+}
+
 /* ---------- MURAL DE RECADOS (entre professores) ---------- */
 async function carregarRecados(){
   try{
@@ -2052,9 +2094,23 @@ async function abrirRecados(){
   const dados = await carregarRecados();
   state.recadosData = [...dados].sort((a,b)=>new Date(b.criadoEm||0)-new Date(a.criadoEm||0));
   state.recadosLoading = false;
+  state.recadosNovidades = 0;
+  marcarComoVisto("recados");
   render();
 }
 
+function responderRecado(id){
+  const alvo = (state.recadosData || []).find(r => r.id === id);
+  if (!alvo) return;
+  state.recadoRespondendo = { id: alvo.id, autor: alvo.autor, texto: alvo.texto };
+  render();
+  const campo = document.getElementById("inRecado");
+  if (campo) campo.focus();
+}
+function cancelarRespostaRecado(){
+  state.recadoRespondendo = null;
+  render();
+}
 async function enviarRecado(){
   const campo = document.getElementById("inRecado");
   if (!campo) return;
@@ -2069,6 +2125,11 @@ async function enviarRecado(){
     texto,
     criadoEm: new Date().toISOString()
   };
+  if (state.recadoRespondendo){
+    registro.respondendoA = state.recadoRespondendo.id;
+    registro.respondendoAutor = state.recadoRespondendo.autor;
+    registro.respondendoTexto = state.recadoRespondendo.texto;
+  }
   try{
     if (firebaseReady && db){
       await db.collection("recados").add(registro);
@@ -2082,6 +2143,7 @@ async function enviarRecado(){
     toast("Erro ao enviar recado: " + (e && e.message ? e.message : "falha desconhecida"));
   }
   state.recadoEnviando = false;
+  state.recadoRespondendo = null;
   await abrirRecados();
 }
 
@@ -2118,11 +2180,19 @@ function tabRecados(){
   <p class="desc">Deixe um recado pros outros professores. Todo mundo vê, na ordem mais recente. Se quiser direcionar pra alguém, comece com "Pra Fulano:".</p>
   ${avisoErro}
 
+  ${state.recadoRespondendo ? `
+  <div style="background:var(--paper);border-left:3px solid var(--sky);border-radius:6px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+    <div style="font-size:12.5px;color:var(--muted);">
+      Respondendo <strong style="color:var(--ink);">${state.recadoRespondendo.autor}</strong>:
+      "${(state.recadoRespondendo.texto||"").slice(0,80).replace(/</g,"&lt;")}${(state.recadoRespondendo.texto||"").length>80?"...":""}"
+    </div>
+    <button id="btnCancelarResposta" style="border:none;background:none;color:var(--muted);font-size:16px;cursor:pointer;line-height:1;">✕</button>
+  </div>` : ""}
   <div class="field">
-    <label>Novo recado</label>
+    <label>${state.recadoRespondendo ? "Sua resposta" : "Novo recado"}</label>
     <textarea id="inRecado" rows="3" placeholder="Escreva seu recado aqui..." ${state.recadoEnviando?"disabled":""}></textarea>
   </div>
-  <button class="btn btn-navy" id="btnEnviarRecado" style="width:100%;margin-bottom:20px;" ${state.recadoEnviando?"disabled":""}>${state.recadoEnviando ? "Enviando..." : "Enviar recado"}</button>
+  <button class="btn btn-navy" id="btnEnviarRecado" style="width:100%;margin-bottom:20px;" ${state.recadoEnviando?"disabled":""}>${state.recadoEnviando ? "Enviando..." : (state.recadoRespondendo ? "Enviar resposta" : "Enviar recado")}</button>
 
   <div class="block-title">Recados (${dados.length})</div>
   ${dados.length===0 ? `<p class="hint">Nenhum recado ainda. Seja o primeiro!</p>` : dados.map(r=>`
@@ -2130,7 +2200,12 @@ function tabRecados(){
       <div style="flex:1;">
         <div class="ex-name">${r.autor||"Anônimo"}</div>
         <div class="ex-meta">${r.criadoEm ? new Date(r.criadoEm).toLocaleString('pt-BR') : ""}</div>
+        ${r.respondendoA ? `
+        <div style="margin-top:6px;background:var(--paper);border-left:3px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;color:var(--muted);">
+          ↳ Respondendo <strong>${r.respondendoAutor||"alguém"}</strong>: "${(r.respondendoTexto||"").slice(0,60).replace(/</g,"&lt;")}${(r.respondendoTexto||"").length>60?"...":""}"
+        </div>` : ""}
         <div style="margin-top:6px;font-size:13.5px;color:var(--ink);white-space:pre-wrap;">${(r.texto||"").replace(/</g,"&lt;")}</div>
+        <button data-responder-recado="${r.id}" style="border:none;background:none;color:var(--sky);font-size:12px;font-weight:600;cursor:pointer;padding:6px 0 0;">↩ Responder</button>
       </div>
       ${r.autor === state.professor ? `<button class="btn-icon-delete" data-apagar-recado="${r.id}" title="Apagar" style="border:none;background:none;color:var(--restrito);font-size:18px;cursor:pointer;padding:2px 8px;">✕</button>` : ""}
     </div>
@@ -2325,8 +2400,13 @@ function attachAppEvents(){
   // Tab Recados
   const btnEnviarRecado = document.getElementById("btnEnviarRecado");
   if (btnEnviarRecado) btnEnviarRecado.onclick = ()=> enviarRecado();
+  const btnCancelarResposta = document.getElementById("btnCancelarResposta");
+  if (btnCancelarResposta) btnCancelarResposta.onclick = ()=> cancelarRespostaRecado();
   document.querySelectorAll("[data-apagar-recado]").forEach(btn=>{
     btn.onclick = ()=> apagarRecado(btn.dataset.apagarRecado);
+  });
+  document.querySelectorAll("[data-responder-recado]").forEach(btn=>{
+    btn.onclick = ()=> responderRecado(btn.dataset.responderRecado);
   });
 }
 
@@ -2569,8 +2649,9 @@ if (avaliarId){
 } else if (pdfId){
   renderPdfPublico(pdfId);
 } else {
-  restaurarSessao();
+  const sessaoRestaurada = restaurarSessao();
   render();
+  if (sessaoRestaurada) atualizarContadoresNovidade();
 }
 
 </script>
