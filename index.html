@@ -1012,6 +1012,8 @@ Nome: ${state.aluno.nome || "não informado"}
 Sexo: ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'não informado'}
 Idade: ${idade !== null ? idade + " anos" : "não informada"}
 Objetivo principal: ${state.anamnese.objetivo || "não informado"}
+Histórico de atividade física: ${state.anamnese.historico || "não informado"}
+Cirurgias/lesões: ${state.anamnese.cirurgias || "nenhuma relatada"}
 Limitações/dores: ${state.anamnese.limitacoes || "nenhuma relatada"}
 Restrições médicas: ${state.anamnese.restricoes || "nenhuma"}
 ${parqTexto}
@@ -1025,7 +1027,7 @@ Capacidade física medida:
 
 Observações do professor: ${state.deficienciaObsExtra || "nenhuma"}
 
-Monte um TREINO DE MUSCULAÇÃO COMPLETO e pronto para aplicar, priorizando a correção das deficiências acima sem perder de vista o objetivo do aluno. Use a idade e a capacidade física medida para calibrar volume e carga inicial (ex: menos repetições/séries de força para quem teve baixa capacidade nos testes ou idade mais avançada). Se houver respostas positivas no PAR-Q, ajuste a prescrição com mais cautela nessa área e sinalize a recomendação de liberação médica antes de iniciar. Estruture em blocos (ex: Aquecimento/Mobilidade, Bloco Principal, Correção/Ativação, Finalização). Para cada exercício informe: nome, séries, repetições (ou tempo), e uma observação técnica curta quando relevante. Seja direto e objetivo — sem citações de artigos, estudos ou periódicos no texto.
+Monte um TREINO DE MUSCULAÇÃO COMPLETO e pronto para aplicar, priorizando a correção das deficiências acima sem perder de vista o objetivo do aluno. Leve em conta o histórico de atividade física, cirurgias/lesões relatadas e as restrições médicas ao definir exercícios, cargas e contraindicações — evite ou adapte movimentos que possam agravar uma lesão/cirurgia relatada. Use a idade e a capacidade física medida para calibrar volume e carga inicial (ex: menos repetições/séries de força para quem teve baixa capacidade nos testes ou idade mais avançada). Se houver respostas positivas no PAR-Q, ajuste a prescrição com mais cautela nessa área e sinalize a recomendação de liberação médica antes de iniciar. Estruture em blocos (ex: Aquecimento/Mobilidade, Bloco Principal, Correção/Ativação, Finalização). Para cada exercício informe: nome, séries, repetições (ou tempo), e uma observação técnica curta quando relevante. Seja direto e objetivo — sem citações de artigos, estudos ou periódicos no texto.
 
 Depois de montar o treino, responda com um bloco de texto contendo SOMENTE JSON válido (sem markdown, sem texto antes ou depois), no formato:
 {
