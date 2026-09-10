@@ -527,9 +527,15 @@ function render(){
   const root = document.getElementById("root");
   if (state.screen === "login") { root.innerHTML = renderLogin(); attachLogin(); return; }
   const scrollY = window.scrollY;
+  const tabsAntigo = document.querySelector(".tabs");
+  const tabsScrollLeft = tabsAntigo ? tabsAntigo.scrollLeft : 0;
   root.innerHTML = renderApp();
   attachAppEvents();
-  requestAnimationFrame(()=> window.scrollTo(0, scrollY));
+  requestAnimationFrame(()=>{
+    window.scrollTo(0, scrollY);
+    const tabsNovo = document.querySelector(".tabs");
+    if (tabsNovo) tabsNovo.scrollLeft = tabsScrollLeft;
+  });
 }
 
 /* ===== LOGIN ===== */
@@ -1665,9 +1671,11 @@ function carregarParaEdicao(a){
   state.saveStatus = "";
   state.saveError = "";
   state.alunoSelecionado = null;
-  state.tab = 1;
+  state.activeTab = currentTabs().indexOf("Anamnese");
+  state.menuMaisAberto = false;
   toast("Atendimento carregado — edite e salve de novo na aba Fechamento.");
   render();
+  requestAnimationFrame(()=> requestAnimationFrame(()=> window.scrollTo(0, 0)));
 }
 
 /* ---------- CONTADOR DE USO DA IA (acompanhamento de custo) ---------- */
@@ -1849,11 +1857,13 @@ function tabAlunos(){
 function abrirAluno(i){
   state.alunoSelecionado = state.alunoBuscaResultados[i];
   render();
+  requestAnimationFrame(()=> window.scrollTo(0, 0));
 }
 
 function voltarListaAlunos(){
   state.alunoSelecionado = null;
   render();
+  requestAnimationFrame(()=> window.scrollTo(0, 0));
 }
 
 function mesAno(isoStr){
@@ -2624,7 +2634,11 @@ function irParaTab(i){
   if (nome === "Alunos") { state.alunoBuscaQuery = ""; state.alunoBuscaResultados = null; state.alunoSelecionado = null; }
   state.menuMaisAberto = false;
   render();
-  requestAnimationFrame(()=> requestAnimationFrame(()=> window.scrollTo(0, 0)));
+  requestAnimationFrame(()=> requestAnimationFrame(()=>{
+    window.scrollTo(0, 0);
+    const tabAtiva = document.querySelector(".tab.active");
+    if (tabAtiva) tabAtiva.scrollIntoView({ behavior: "instant", inline: "nearest", block: "nearest" });
+  }));
 }
 function attachAppEvents(){
   document.getElementById("btnSair").onclick = ()=>{
