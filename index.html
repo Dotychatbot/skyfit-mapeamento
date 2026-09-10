@@ -164,6 +164,25 @@
   }
   .tab.active .num{background:var(--red);}
   .tab.done .num{background:var(--ok);}
+  .tabs-wrap{position:relative;}
+  .menu-mais{
+    position:absolute;top:100%;right:16px;z-index:50;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 8px 24px rgba(13,47,82,.18);min-width:220px;
+    padding:6px;margin-top:4px;
+  }
+  .menu-mais-item{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:13px 14px;border-radius:8px;cursor:pointer;
+    font-size:15px;font-weight:600;color:var(--ink);
+    min-height:24px;
+  }
+  .menu-mais-item:active{background:var(--paper);}
+  .menu-mais-item.active{background:var(--paper);color:var(--navy);}
+  .aviso-nuvem{
+    background:var(--red);color:#fff;font-size:12.5px;font-weight:700;
+    text-align:center;padding:6px 10px;
+  }
 
   .panel{
     background:var(--card);margin:0 16px 16px;padding:22px;
@@ -464,13 +483,17 @@ const state = {
   recadosNovidades:0,
   avaliacoesNovidades:0,
   recadoRespondendo:null,
+  recadoAnexo:null,
   hojeData:null,
-  hojeLoading:false
+  hojeLoading:false,
+  menuMaisAberto:false,
+  nuvemOk:firebaseReady
 };
 
 const TABS_BASE = ["Protocolos","Anamnese","Mapeamento","Deficiências","Treino (IA)","Fechamento","Alunos","Recados","Tutorial","Hoje"];
+const TABS_ADMIN = ["Alunos","Recados","Hoje","Estatísticas","Avaliações"];
 function currentTabs(){
-  return state.role === "admin" ? [...TABS_BASE, "Estatísticas", "Avaliações"] : TABS_BASE;
+  return state.role === "admin" ? TABS_ADMIN : TABS_BASE;
 }
 
 function toast(msg){
@@ -520,7 +543,10 @@ function renderLogin(){
       </div>
       <div class="field">
         <label>Senha de acesso</label>
-        <input id="inSenha" type="password" placeholder="Senha da academia"/>
+        <div style="position:relative;">
+          <input id="inSenha" type="password" placeholder="Senha da academia" style="padding-right:44px;width:100%;"/>
+          <button type="button" id="btnMostrarSenha" aria-label="Mostrar senha" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;padding:6px;line-height:1;color:var(--muted);">👁️</button>
+        </div>
       </div>
       <div class="err" id="loginErr"></div>
       <button class="btn btn-primary" id="btnLogin">Entrar</button>
@@ -553,6 +579,15 @@ function encerrarSessao(){
 }
 
 function attachLogin(){
+  const btnMostrarSenha = document.getElementById("btnMostrarSenha");
+  if (btnMostrarSenha){
+    btnMostrarSenha.onclick = ()=>{
+      const campo = document.getElementById("inSenha");
+      const mostrando = campo.type === "text";
+      campo.type = mostrando ? "password" : "text";
+      btnMostrarSenha.textContent = mostrando ? "👁️" : "🙈";
+    };
+  }
   document.getElementById("btnLogin").onclick = ()=>{
     const nome = document.getElementById("inNome").value.trim();
     const senha = document.getElementById("inSenha").value;
@@ -562,6 +597,7 @@ function attachLogin(){
       state.professor = nome;
       state.role = "admin";
       state.screen = "app";
+      state.activeTab = TABS_ADMIN.indexOf("Hoje");
       salvarSessao();
       render();
       atualizarContadoresNovidade();
@@ -584,15 +620,42 @@ function renderApp(){
     <div class="brand">
       <div class="brand-text"><b>SKY FIT ACADEMIA</b><span>Mapeamento Biomecânico</span></div>
     </div>
+    ${firebaseReady && !state.nuvemOk ? `<div class="aviso-nuvem">⚠️ Sem conexão com a nuvem — salvando só neste aparelho por enquanto</div>` : ""}
     <div class="prof-badge">👤 ${state.professor}${state.role==='admin' ? ' <span style="color:var(--gold);font-weight:800;">· ADMIN</span>' : ''} <button id="btnSair">sair</button></div>
   </div>
   <div class="app">
-    <div class="tabs">
-      ${currentTabs().map((t,i)=>{
-        const badgeCount = t === "Recados" ? state.recadosNovidades : (t === "Avaliações" ? state.avaliacoesNovidades : 0);
-        const badge = badgeCount > 0 ? `<span class="badge-novidade">${badgeCount > 9 ? "9+" : badgeCount}</span>` : "";
-        return `<div class="tab ${state.activeTab===i?'active':''}" data-tab="${i}"><span class="num">${i+1}</span>${t}${badge}</div>`;
-      }).join("")}
+    <div class="tabs-wrap">
+      ${state.role === "admin" ? `
+      <div class="tabs">
+        ${(()=>{
+          const icones = { "Alunos":"👥", "Recados":"💬", "Hoje":"📅", "Estatísticas":"📊", "Avaliações":"⭐" };
+          return TABS_ADMIN.map((t,i)=>{
+            const badgeCount = t === "Recados" ? state.recadosNovidades : (t === "Avaliações" ? state.avaliacoesNovidades : 0);
+            const badge = badgeCount > 0 ? `<span class="badge-novidade">${badgeCount > 9 ? "9+" : badgeCount}</span>` : "";
+            return `<div class="tab ${state.activeTab===i?'active':''}" data-tab="${i}">${icones[t]||"•"} ${t}${badge}</div>`;
+          }).join("");
+        })()}
+      </div>
+      ` : `
+      <div class="tabs">
+        ${TABS_BASE.slice(0,7).map((t,i)=>`<div class="tab ${state.activeTab===i?'active':''}" data-tab="${i}"><span class="num">${i+1}</span>${t}</div>`).join("")}
+        ${(()=>{ 
+          const extrasBadge = (state.recadosNovidades||0);
+          const badge = extrasBadge > 0 ? `<span class="badge-novidade">${extrasBadge > 9 ? "9+" : extrasBadge}</span>` : "";
+          return `<div class="tab ${state.activeTab>=7?'active':''}" id="btnAbrirMais">☰ Mais${badge}</div>`;
+        })()}
+      </div>
+      ${state.menuMaisAberto ? `
+      <div class="menu-mais">
+        ${currentTabs().slice(7).map((t,idx)=>{
+          const i = idx + 7;
+          const icones = { "Recados":"💬", "Tutorial":"📘", "Hoje":"📅" };
+          const badgeCount = t === "Recados" ? state.recadosNovidades : 0;
+          const badge = badgeCount > 0 ? `<span class="badge-novidade">${badgeCount > 9 ? "9+" : badgeCount}</span>` : "";
+          return `<div class="menu-mais-item ${state.activeTab===i?'active':''}" data-tab-mais="${i}"><span>${icones[t]||"•"} ${t}</span>${badge}</div>`;
+        }).join("")}
+      </div>` : ""}
+      `}
     </div>
     <div class="panel">${renderTab(state.activeTab)}</div>
   </div>
@@ -600,19 +663,21 @@ function renderApp(){
 }
 
 function renderTab(i){
-  switch(i){
-    case 0: return tabProtocolos();
-    case 1: return tabAnamnese();
-    case 2: return tabMapeamento();
-    case 3: return tabDeficiencias();
-    case 4: return tabTreino();
-    case 5: return tabFechamento();
-    case 6: return tabAlunos();
-    case 7: return tabRecados();
-    case 8: return tabTutorial();
-    case 9: return tabHoje();
-    case 10: return tabEstatisticas();
-    case 11: return tabAvaliacoes();
+  const nome = currentTabs()[i];
+  switch(nome){
+    case "Protocolos": return tabProtocolos();
+    case "Anamnese": return tabAnamnese();
+    case "Mapeamento": return tabMapeamento();
+    case "Deficiências": return tabDeficiencias();
+    case "Treino (IA)": return tabTreino();
+    case "Fechamento": return tabFechamento();
+    case "Alunos": return tabAlunos();
+    case "Recados": return tabRecados();
+    case "Tutorial": return tabTutorial();
+    case "Hoje": return tabHoje();
+    case "Estatísticas": return tabEstatisticas();
+    case "Avaliações": return tabAvaliacoes();
+    default: return tabAlunos();
   }
 }
 
@@ -1525,12 +1590,22 @@ async function salvarAtendimento(silencioso){
     state.saveStatus = "ok";
     state.saveError = "";
     state.ultimoAutosave = new Date();
+    marcarNuvemStatus(true);
   }catch(e){
     console.error(e);
     state.saveStatus = "err";
     state.saveError = e && e.message ? e.message : "falha desconhecida";
+    marcarNuvemStatus(false);
   }
   if (!silencioso) render();
+}
+
+/* ---------- STATUS DA NUVEM (indicador visível durante o uso) ---------- */
+function marcarNuvemStatus(ok){
+  if (state.nuvemOk !== ok){
+    state.nuvemOk = ok;
+    render();
+  }
 }
 
 /* ---------- AUTOSALVAMENTO (rascunho automático, silencioso) ---------- */
@@ -2093,6 +2168,19 @@ async function atualizarContadoresNovidade(){
     const recados = await carregarRecados();
     const ultimoRecados = getUltimoVisto("recados");
     state.recadosNovidades = recados.filter(r => r.autor !== state.professor && (!ultimoRecados || new Date(r.criadoEm) > new Date(ultimoRecados))).length;
+
+    // Aviso sonoro/vibração só quando alguém responde diretamente a uma mensagem minha
+    const ultimaNotif = getUltimaNotificacao();
+    const respostasParaMim = recados.filter(r =>
+      r.respondendoAutor === state.professor &&
+      r.autor !== state.professor &&
+      (!ultimaNotif || new Date(r.criadoEm) > new Date(ultimaNotif))
+    );
+    if (respostasParaMim.length > 0){
+      notificarRespostaRecebida();
+      const maisRecente = respostasParaMim.reduce((max,r)=> new Date(r.criadoEm) > new Date(max) ? r.criadoEm : max, respostasParaMim[0].criadoEm);
+      marcarUltimaNotificacao(maisRecente);
+    }
   }catch(e){ console.error(e); }
   if (state.role === "admin"){
     try{
@@ -2103,6 +2191,34 @@ async function atualizarContadoresNovidade(){
   }
   render();
 }
+setInterval(()=>{ if (state.screen === "app") atualizarContadoresNovidade(); }, 45000);
+
+/* ---------- AVISO SONORO/VIBRAÇÃO (só quando respondem uma mensagem sua) ---------- */
+function getUltimaNotificacao(){
+  try{ return localStorage.getItem(`skyfit_ultimanotif_${state.professor}`) || null; }
+  catch(e){ return null; }
+}
+function marcarUltimaNotificacao(iso){
+  try{ localStorage.setItem(`skyfit_ultimanotif_${state.professor}`, iso); }
+  catch(e){}
+}
+function notificarRespostaRecebida(){
+  try{ if (navigator.vibrate) navigator.vibrate([120,60,120]); }catch(e){}
+  try{
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.stop(ctx.currentTime + 0.35);
+  }catch(e){}
+  toast("💬 Alguém respondeu sua mensagem no mural de Recados");
+}
 
 /* ---------- MURAL DE RECADOS (entre professores) ---------- */
 async function carregarRecados(){
@@ -2110,6 +2226,7 @@ async function carregarRecados(){
     if (firebaseReady && db){
       const snap = await db.collection("recados").get();
       state.firestoreErro = "";
+      marcarNuvemStatus(true);
       return snap.docs.map(d=>d.data());
     } else {
       return JSON.parse(localStorage.getItem("skyfit_recados") || "[]");
@@ -2117,6 +2234,7 @@ async function carregarRecados(){
   }catch(e){
     console.error(e);
     state.firestoreErro = e && e.message ? e.message : "falha desconhecida";
+    marcarNuvemStatus(false);
     return [];
   }
 }
@@ -2144,11 +2262,54 @@ function cancelarRespostaRecado(){
   state.recadoRespondendo = null;
   render();
 }
+function comprimirImagem(file, maxDim, qualidade){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let { width, height } = img;
+        if (width > height && width > maxDim){ height = Math.round(height * (maxDim/width)); width = maxDim; }
+        else if (height > maxDim){ width = Math.round(width * (maxDim/height)); height = maxDim; }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", qualidade));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function anexarFotoRecado(file){
+  if (!file) return;
+  if (!file.type.startsWith("image/")){ toast("Só é possível anexar fotos por enquanto."); return; }
+  try{
+    const dataUrl = await comprimirImagem(file, 1280, 0.72);
+    if (dataUrl.length > 900000){
+      toast("Essa foto ficou grande demais mesmo comprimida. Tenta outra.");
+      return;
+    }
+    state.recadoAnexo = { dataUrl, nome: file.name };
+    render();
+  }catch(e){
+    console.error(e);
+    toast("Não consegui processar essa foto.");
+  }
+}
+function removerAnexoRecado(){
+  state.recadoAnexo = null;
+  render();
+}
+
 async function enviarRecado(){
   const campo = document.getElementById("inRecado");
   if (!campo) return;
   const texto = campo.value.trim();
-  if (!texto){ toast("Escreve o recado antes de enviar."); return; }
+  if (!texto && !state.recadoAnexo){ toast("Escreve o recado ou anexa uma foto antes de enviar."); return; }
   if (state.recadoEnviando) return;
   state.recadoEnviando = true;
   render();
@@ -2158,6 +2319,9 @@ async function enviarRecado(){
     texto,
     criadoEm: new Date().toISOString()
   };
+  if (state.recadoAnexo){
+    registro.anexo = state.recadoAnexo.dataUrl;
+  }
   if (state.recadoRespondendo){
     registro.respondendoA = state.recadoRespondendo.id;
     registro.respondendoAutor = state.recadoRespondendo.autor;
@@ -2177,6 +2341,7 @@ async function enviarRecado(){
   }
   state.recadoEnviando = false;
   state.recadoRespondendo = null;
+  state.recadoAnexo = null;
   await abrirRecados();
 }
 
@@ -2225,6 +2390,20 @@ function tabRecados(){
     <label>${state.recadoRespondendo ? "Sua resposta" : "Novo recado"}</label>
     <textarea id="inRecado" rows="3" placeholder="Escreva seu recado aqui..." ${state.recadoEnviando?"disabled":""}></textarea>
   </div>
+
+  ${state.recadoAnexo ? `
+  <div style="position:relative;display:inline-block;margin-bottom:10px;">
+    <img src="${state.recadoAnexo.dataUrl}" style="max-width:140px;max-height:140px;border-radius:8px;border:1px solid var(--line);display:block;"/>
+    <button id="btnRemoverAnexo" style="position:absolute;top:-8px;right:-8px;background:var(--restrito);color:#fff;border:none;border-radius:50%;width:24px;height:24px;font-size:14px;cursor:pointer;line-height:1;">✕</button>
+  </div>` : ""}
+
+  <div style="margin-bottom:14px;">
+    <label class="btn btn-outline" style="display:inline-block;cursor:pointer;font-size:14px;padding:9px 16px;">
+      📎 ${state.recadoAnexo ? "Trocar foto" : "Anexar foto"}
+      <input type="file" id="inAnexoRecado" accept="image/*" style="display:none;" ${state.recadoEnviando?"disabled":""}/>
+    </label>
+  </div>
+
   <button class="btn btn-navy" id="btnEnviarRecado" style="width:100%;margin-bottom:20px;" ${state.recadoEnviando?"disabled":""}>${state.recadoEnviando ? "Enviando..." : (state.recadoRespondendo ? "Enviar resposta" : "Enviar recado")}</button>
 
   <div class="block-title">Recados (${dados.length})</div>
@@ -2237,7 +2416,8 @@ function tabRecados(){
         <div style="margin-top:6px;background:var(--paper);border-left:3px solid var(--line);border-radius:6px;padding:6px 8px;font-size:14px;color:var(--muted);">
           ↳ Respondendo <strong>${r.respondendoAutor||"alguém"}</strong>: "${(r.respondendoTexto||"").slice(0,60).replace(/</g,"&lt;")}${(r.respondendoTexto||"").length>60?"...":""}"
         </div>` : ""}
-        <div style="margin-top:6px;font-size:15.5px;color:var(--ink);white-space:pre-wrap;">${(r.texto||"").replace(/</g,"&lt;")}</div>
+        ${r.texto ? `<div style="margin-top:6px;font-size:15.5px;color:var(--ink);white-space:pre-wrap;">${r.texto.replace(/</g,"&lt;")}</div>` : ""}
+        ${r.anexo ? `<img src="${r.anexo}" data-ver-anexo="${r.id}" style="margin-top:8px;max-width:200px;max-height:200px;border-radius:8px;border:1px solid var(--line);display:block;cursor:pointer;"/>` : ""}
         <button data-responder-recado="${r.id}" style="border:none;background:none;color:var(--sky);font-size:14px;font-weight:600;cursor:pointer;padding:6px 0 0;">↩ Responder</button>
       </div>
       ${r.autor === state.professor ? `<button class="btn-icon-delete" data-apagar-recado="${r.id}" title="Apagar" style="border:none;background:none;color:var(--restrito);font-size:18px;cursor:pointer;padding:2px 8px;">✕</button>` : ""}
@@ -2384,11 +2564,42 @@ function tabHoje(){
 }
 
 /* ---------- EVENTOS ---------- */
+function irParaTab(i){
+  saveCurrentTabInputs();
+  autosalvarSeNecessario();
+  state.activeTab = i;
+  const nome = currentTabs()[i];
+  if (nome === "Recados") state.recadosData = null;
+  if (nome === "Hoje") state.hojeData = null;
+  if (nome === "Estatísticas") state.statsData = null;
+  if (nome === "Avaliações") state.avaliacoesData = null;
+  if (nome === "Alunos") { state.alunoBuscaQuery = ""; state.alunoBuscaResultados = null; state.alunoSelecionado = null; }
+  state.menuMaisAberto = false;
+  render();
+}
 function attachAppEvents(){
-  document.getElementById("btnSair").onclick = ()=>{ encerrarSessao(); render(); };
-  document.querySelectorAll(".tab").forEach(el=>{
-    el.onclick = ()=>{ saveCurrentTabInputs(); autosalvarSeNecessario(); state.activeTab = parseInt(el.dataset.tab); if (state.activeTab === 7) state.recadosData = null; if (state.activeTab === 9) state.hojeData = null; if (state.activeTab === 10) state.statsData = null; if (state.activeTab === 11) state.avaliacoesData = null; if (state.activeTab === 6) { state.alunoBuscaQuery = ""; state.alunoBuscaResultados = null; state.alunoSelecionado = null; } render(); };
+  document.getElementById("btnSair").onclick = ()=>{
+    if (!confirm("Tem certeza que quer sair? Se tiver um atendimento em andamento, ele já foi salvo automaticamente, mas confira antes de sair.")) return;
+    encerrarSessao();
+    render();
+  };
+  document.querySelectorAll(".tab[data-tab]").forEach(el=>{
+    el.onclick = ()=> irParaTab(parseInt(el.dataset.tab));
   });
+  const btnAbrirMais = document.getElementById("btnAbrirMais");
+  if (btnAbrirMais) btnAbrirMais.onclick = (e)=>{ e.stopPropagation(); state.menuMaisAberto = !state.menuMaisAberto; render(); };
+  document.querySelectorAll("[data-tab-mais]").forEach(el=>{
+    el.onclick = ()=> irParaTab(parseInt(el.dataset.tabMais));
+  });
+  if (state.menuMaisAberto){
+    document.addEventListener("click", function fechaMenu(e){
+      if (!e.target.closest(".menu-mais") && !e.target.closest("#btnAbrirMais")){
+        state.menuMaisAberto = false;
+        document.removeEventListener("click", fechaMenu);
+        render();
+      }
+    });
+  }
   const prev = document.getElementById("prevTab");
   const next = document.getElementById("nextTab");
   if (prev) prev.onclick = ()=>{ saveCurrentTabInputs(); autosalvarSeNecessario(); state.activeTab--; render(); };
@@ -2577,6 +2788,16 @@ function attachAppEvents(){
   });
   document.querySelectorAll("[data-responder-recado]").forEach(btn=>{
     btn.onclick = ()=> responderRecado(btn.dataset.responderRecado);
+  });
+  const inAnexoRecado = document.getElementById("inAnexoRecado");
+  if (inAnexoRecado) inAnexoRecado.onchange = (e)=>{ if (e.target.files[0]) anexarFotoRecado(e.target.files[0]); };
+  const btnRemoverAnexo = document.getElementById("btnRemoverAnexo");
+  if (btnRemoverAnexo) btnRemoverAnexo.onclick = ()=> removerAnexoRecado();
+  document.querySelectorAll("[data-ver-anexo]").forEach(img=>{
+    img.onclick = ()=>{
+      const w = window.open("");
+      if (w) w.document.write(`<img src="${img.src}" style="max-width:100%;">`);
+    };
   });
 
   // Tab Hoje
