@@ -601,6 +601,7 @@ function attachLogin(){
       salvarSessao();
       render();
       atualizarContadoresNovidade();
+      carregarApiKeyDaNuvem();
       return;
     }
     if (senha !== SENHA_PADRAO){ err.textContent = "Senha incorreta."; return; }
@@ -610,6 +611,7 @@ function attachLogin(){
     salvarSessao();
     render();
     atualizarContadoresNovidade();
+    carregarApiKeyDaNuvem();
   };
 }
 
@@ -1091,11 +1093,39 @@ function tabDeficiencias(){
 }
 
 /* ===== TAB 3: TREINO IA ===== */
+let API_KEY_CACHE = null;
 function getApiKey(){
+  if (API_KEY_CACHE !== null) return API_KEY_CACHE;
   return localStorage.getItem("skyfit_anthropic_key") || "";
 }
-function setApiKey(key){
-  localStorage.setItem("skyfit_anthropic_key", key);
+async function carregarApiKeyDaNuvem(){
+  if (firebaseReady && db){
+    try{
+      const doc = await db.collection("config").doc("apiKey").get();
+      API_KEY_CACHE = (doc.exists && doc.data().chave) ? doc.data().chave : "";
+      marcarNuvemStatus(true);
+    }catch(e){
+      console.error(e);
+      marcarNuvemStatus(false);
+      API_KEY_CACHE = localStorage.getItem("skyfit_anthropic_key") || "";
+    }
+  } else {
+    API_KEY_CACHE = localStorage.getItem("skyfit_anthropic_key") || "";
+  }
+  render();
+}
+async function setApiKey(key){
+  API_KEY_CACHE = key;
+  if (firebaseReady && db){
+    try{
+      await db.collection("config").doc("apiKey").set({ chave: key });
+    }catch(e){
+      console.error(e);
+      toast("Erro ao salvar na nuvem: " + (e && e.message ? e.message : "falha desconhecida"));
+    }
+  } else {
+    localStorage.setItem("skyfit_anthropic_key", key);
+  }
 }
 
 async function gerarTreinoIA(){
@@ -1889,8 +1919,24 @@ function tabEstatisticas(){
   }).slice(-6);
   const maxMes = Math.max(1, ...mesesOrdenados.map(e=>e[1]));
 
+  const temChave = !!getApiKey();
+  const configChave = `
+  <div class="summary-mini" style="margin-bottom:16px;">
+    <div style="margin-bottom:10px;">
+      <b>Chave de IA (Anthropic)</b>
+      <div style="font-size:13.5px;color:var(--muted);margin-top:2px;">${temChave ? (firebaseReady ? "✓ Configurada na nuvem — vale para todos os professores" : "✓ Configurada neste aparelho apenas (nuvem não conectada)") : "Ainda não configurada — necessária para os professores gerarem treino"}</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="password" id="inputApiKey" placeholder="sk-ant-..." value="${getApiKey()}" autocomplete="off"
+        style="flex:1;min-width:180px;padding:9px 11px;border-radius:8px;border:1.5px solid var(--line);font-size:16.5px;font-family:inherit;"/>
+      <button class="btn btn-outline" id="btnSalvarChave" style="padding:9px 16px;font-size:16px;">Salvar</button>
+      ${temChave ? `<button class="btn btn-outline" id="btnResetChave" style="padding:9px 16px;font-size:16px;color:var(--restrito);border-color:var(--restrito);">Resetar</button>` : ""}
+    </div>
+  </div>`;
+
   return `
   <h2>Estatísticas</h2>
+  ${configChave}
   <p class="desc">${firebaseReady ? "Dados consolidados na nuvem." : "Dados deste aparelho (localStorage) — quando o Firebase for configurado, isso passa a somar todos os professores."}</p>
   ${avisoErro}
 
@@ -2696,22 +2742,22 @@ function attachAppEvents(){
   const btnGerar = document.getElementById("btnGerarTreino");
   if (btnGerar) btnGerar.onclick = gerarTreinoIA;
   const btnSalvarChave = document.getElementById("btnSalvarChave");
-  if (btnSalvarChave) btnSalvarChave.onclick = ()=>{
+  if (btnSalvarChave) btnSalvarChave.onclick = async ()=>{
     const input = document.getElementById("inputApiKey");
     const nova = (input?.value || "").trim();
     if (nova){
-      setApiKey(nova);
-      toast("Chave salva neste aparelho.");
+      await setApiKey(nova);
+      toast(firebaseReady ? "Chave salva na nuvem — vale para todos os aparelhos." : "Chave salva neste aparelho.");
       render();
     } else {
       toast("Cole a chave antes de salvar.");
     }
   };
   const btnResetChave = document.getElementById("btnResetChave");
-  if (btnResetChave) btnResetChave.onclick = ()=>{
-    if (confirm("Tem certeza que quer limpar a chave de IA salva neste aparelho?")){
-      setApiKey("");
-      toast("Chave removida deste aparelho.");
+  if (btnResetChave) btnResetChave.onclick = async ()=>{
+    if (confirm("Tem certeza que quer limpar a chave de IA? Isso afeta todos os aparelhos.")){
+      await setApiKey("");
+      toast("Chave removida.");
       render();
     }
   };
@@ -3046,7 +3092,7 @@ if (avaliarId){
 } else {
   const sessaoRestaurada = restaurarSessao();
   render();
-  if (sessaoRestaurada) atualizarContadoresNovidade();
+  if (sessaoRestaurada) { atualizarContadoresNovidade(); carregarApiKeyDaNuvem(); }
 }
 
 </script>
