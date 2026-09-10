@@ -484,6 +484,7 @@ const state = {
   avaliacoesNovidades:0,
   recadoRespondendo:null,
   recadoAnexo:null,
+  recadoRascunho:"",
   hojeData:null,
   hojeLoading:false,
   menuMaisAberto:false,
@@ -1634,7 +1635,7 @@ async function salvarAtendimento(silencioso){
 function marcarNuvemStatus(ok){
   if (state.nuvemOk !== ok){
     state.nuvemOk = ok;
-    render();
+    if (document.activeElement?.id !== "inRecado") render();
   }
 }
 
@@ -2235,7 +2236,7 @@ async function atualizarContadoresNovidade(){
       state.avaliacoesNovidades = avaliacoes.filter(a => (!ultimoAval || new Date(a.criadoEm) > new Date(ultimoAval))).length;
     }catch(e){ console.error(e); }
   }
-  render();
+  if (document.activeElement?.id !== "inRecado") render();
 }
 setInterval(()=>{ if (state.screen === "app") atualizarContadoresNovidade(); }, 45000);
 
@@ -2352,9 +2353,7 @@ function removerAnexoRecado(){
 }
 
 async function enviarRecado(){
-  const campo = document.getElementById("inRecado");
-  if (!campo) return;
-  const texto = campo.value.trim();
+  const texto = (state.recadoRascunho || "").trim();
   if (!texto && !state.recadoAnexo){ toast("Escreve o recado ou anexa uma foto antes de enviar."); return; }
   if (state.recadoEnviando) return;
   state.recadoEnviando = true;
@@ -2388,6 +2387,7 @@ async function enviarRecado(){
   state.recadoEnviando = false;
   state.recadoRespondendo = null;
   state.recadoAnexo = null;
+  state.recadoRascunho = "";
   await abrirRecados();
 }
 
@@ -2434,7 +2434,7 @@ function tabRecados(){
   </div>` : ""}
   <div class="field">
     <label>${state.recadoRespondendo ? "Sua resposta" : "Novo recado"}</label>
-    <textarea id="inRecado" rows="3" placeholder="Escreva seu recado aqui..." ${state.recadoEnviando?"disabled":""}></textarea>
+    <textarea id="inRecado" rows="3" placeholder="Escreva seu recado aqui..." ${state.recadoEnviando?"disabled":""}>${state.recadoRascunho||""}</textarea>
   </div>
 
   ${state.recadoAnexo ? `
@@ -2835,6 +2835,8 @@ function attachAppEvents(){
   document.querySelectorAll("[data-responder-recado]").forEach(btn=>{
     btn.onclick = ()=> responderRecado(btn.dataset.responderRecado);
   });
+  const inRecado = document.getElementById("inRecado");
+  if (inRecado) inRecado.oninput = (e)=>{ state.recadoRascunho = e.target.value; };
   const inAnexoRecado = document.getElementById("inAnexoRecado");
   if (inAnexoRecado) inAnexoRecado.onchange = (e)=>{ if (e.target.files[0]) anexarFotoRecado(e.target.files[0]); };
   const btnRemoverAnexo = document.getElementById("btnRemoverAnexo");
