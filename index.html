@@ -529,7 +529,7 @@ function render(){
   const scrollY = window.scrollY;
   root.innerHTML = renderApp();
   attachAppEvents();
-  window.scrollTo(0, scrollY);
+  requestAnimationFrame(()=> window.scrollTo(0, scrollY));
 }
 
 /* ===== LOGIN ===== */
@@ -2624,7 +2624,7 @@ function irParaTab(i){
   if (nome === "Alunos") { state.alunoBuscaQuery = ""; state.alunoBuscaResultados = null; state.alunoSelecionado = null; }
   state.menuMaisAberto = false;
   render();
-  window.scrollTo(0, 0);
+  requestAnimationFrame(()=> requestAnimationFrame(()=> window.scrollTo(0, 0)));
 }
 function attachAppEvents(){
   document.getElementById("btnSair").onclick = ()=>{
