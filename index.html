@@ -526,8 +526,10 @@ function deficienciasSugeridas(){
 function render(){
   const root = document.getElementById("root");
   if (state.screen === "login") { root.innerHTML = renderLogin(); attachLogin(); return; }
+  const scrollY = window.scrollY;
   root.innerHTML = renderApp();
   attachAppEvents();
+  window.scrollTo(0, scrollY);
 }
 
 /* ===== LOGIN ===== */
@@ -2622,6 +2624,7 @@ function irParaTab(i){
   if (nome === "Alunos") { state.alunoBuscaQuery = ""; state.alunoBuscaResultados = null; state.alunoSelecionado = null; }
   state.menuMaisAberto = false;
   render();
+  window.scrollTo(0, 0);
 }
 function attachAppEvents(){
   document.getElementById("btnSair").onclick = ()=>{
@@ -2648,8 +2651,8 @@ function attachAppEvents(){
   }
   const prev = document.getElementById("prevTab");
   const next = document.getElementById("nextTab");
-  if (prev) prev.onclick = ()=>{ saveCurrentTabInputs(); autosalvarSeNecessario(); state.activeTab--; render(); };
-  if (next) next.onclick = ()=>{ saveCurrentTabInputs(); autosalvarSeNecessario(); state.activeTab++; render(); };
+  if (prev) prev.onclick = ()=> irParaTab(state.activeTab - 1);
+  if (next) next.onclick = ()=> irParaTab(state.activeTab + 1);
 
   // Tab 0
   const bindText = (id, obj, key)=>{ const el=document.getElementById(id); if(el) el.oninput = ()=> obj[key]=el.value; };
