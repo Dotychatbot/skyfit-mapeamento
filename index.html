@@ -314,7 +314,7 @@ const LOGO_SKYFIT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAA
    ========================================================= */
 
 /* ---------- CONFIG ---------- */
-const APP_VERSAO = "2026-10-13.8"; // atualizar a cada mudança publicada, ajuda a confirmar se o link está com a versão mais nova
+const APP_VERSAO = "2026-10-14.3"; // atualizar a cada mudança publicada, ajuda a confirmar se o link está com a versão mais nova
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA9DT4_HMSnFZB3gpFrF35vRr36Aiu0osw",
   authDomain: "skyfit-mapeamento.firebaseapp.com",
@@ -451,7 +451,7 @@ const state = {
   anamnese: {historico:"", limitacoes:"", cirurgias:"", restricoes:"", objetivo:"", freqSemana:"", tipoTreino:"", tipoTreinoOutro:"", parq:{q1:"",q2:"",q3:"",q4:"",q5:"",q6:"",q7:""}, parqDetalhes:"", consentimentoParq:false},
   testes: {
     tornozelo:{status:"", obs:""},
-    thomas:{status:"", obs:""},
+    thomas:{status:"", obs:"", dir:"", esq:"", dirComp:"", esqComp:""},
     birddog:{status:"", obs:""},
     stork:{status:"", obs:"", tempo:""},
     prancha:{status:"", obs:"", tempo:""},
@@ -493,8 +493,15 @@ const state = {
   atendimentoCupom:null,
   professoresLista:null,
   professoresErro:"",
-  cupomConfig:{ recepcao:"5519971685416", campanhaAtiva:true, validadeDias:7, planos:planosPadrao() },
+  cupomConfig:{ recepcao:"5519971685416", campanhaAtiva:true, validadeDias:7, pontosVenda:0, planos:planosPadrao() },
   ofereceDesconto:true,
+  envio:null,
+  contatoAutorizado:false,
+  fotos:[],
+  reavaliacaoDe:null,
+  alunoReavaliarModo:false,
+  enviosData:null,
+  enviosLoading:false,
   cupomForm:null,
   loginSemLista:false,
   vendasData:null,
@@ -502,8 +509,8 @@ const state = {
   vendasMes:null
 };
 
-const TABS_BASE = ["Protocolos","Anamnese","Mapeamento","Deficiências","Treino (IA)","Fechamento","Alunos","Recados","Tutorial","Hoje"];
-const TABS_ADMIN = ["Alunos","Recados","Hoje","Vendas","Professores","Estatísticas","Avaliações"];
+const TABS_BASE = ["Protocolos","Anamnese","Mapeamento","Deficiências","Treino (IA)","Fechamento","Alunos","Envios","Recados","Tutorial","Hoje"];
+const TABS_ADMIN = ["Alunos","Envios","Recados","Hoje","Vendas","Professores","Estatísticas","Avaliações"];
 function currentTabs(){
   return state.role === "admin" ? TABS_ADMIN : TABS_BASE;
 }
@@ -520,7 +527,7 @@ function deficienciasSugeridas(){
   const s = [];
   const t = state.testes;
   if (t.tornozelo.status === "restrito") s.push("tornozelo");
-  if (t.thomas.status === "restrito") s.push("thomas");
+  if (t.thomas.status === "restrito" || ["psoas","reto","tfl"].includes(t.thomas.dir) || ["psoas","reto","tfl"].includes(t.thomas.esq) || t.thomas.dirComp === "sim" || t.thomas.esqComp === "sim") s.push("thomas");
   if (t.birddog.status === "restrito") s.push("birddog");
   if (t.stork.status === "restrito") s.push("stork");
   if (t.prancha.status === "restrito") s.push("prancha");
@@ -593,6 +600,8 @@ function restaurarSessao(){
   }catch(e){ return false; }
 }
 function encerrarSessao(){
+  try{ salvarRascunho(); }catch(e){}
+  try{ resetarFluxo(); }catch(e){}
   try{ localStorage.removeItem("skyfit_sessao"); }catch(e){}
   state.professor = "";
   state.role = "professor";
@@ -636,6 +645,7 @@ function attachLogin(){
     state.role = "professor";
     state.screen = "app";
     salvarSessao();
+    if (restaurarRascunho()) setTimeout(()=> toast(`Retomei o atendimento de ${state.aluno.nome || "aluno"}. Para começar outro, use Novo atendimento no Fechamento.`), 400);
     render();
     atualizarContadoresNovidade();
     carregarApiKeyDaNuvem();
@@ -651,6 +661,7 @@ function renderApp(){
       <div class="brand-text"><b>SKY FIT ACADEMIA</b><span>Mapeamento Biomecânico</span></div>
     </div>
     ${firebaseReady && !state.nuvemOk ? `<div class="aviso-nuvem">⚠️ Sem conexão com a nuvem — salvando só neste aparelho por enquanto</div>` : ""}
+    ${state.role === "admin" && (diasDesdeBackup() === null || diasDesdeBackup() >= 7) ? `<div class="aviso-nuvem" id="avisoBackup" style="cursor:pointer;">💾 ${diasDesdeBackup() === null ? "Nenhum backup baixado ainda" : "Faz " + diasDesdeBackup() + " dias do último backup"} — toque aqui para baixar agora</div>` : ""}
     <div class="prof-badge">👤 ${state.professor}${state.role==='admin' ? ' <span style="color:var(--gold);font-weight:800;">· ADMIN</span>' : ''} <button id="btnSair">sair</button></div>
   </div>
   <div class="app">
@@ -658,7 +669,7 @@ function renderApp(){
       ${state.role === "admin" ? `
       <div class="tabs">
         ${(()=>{
-          const icones = { "Alunos":"👥", "Recados":"💬", "Hoje":"📅", "Vendas":"🎟️", "Professores":"🧑‍🏫", "Estatísticas":"📊", "Avaliações":"⭐" };
+          const icones = { "Alunos":"👥", "Recados":"💬", "Hoje":"📅", "Envios":"📲", "Vendas":"🎟️", "Professores":"🧑‍🏫", "Estatísticas":"📊", "Avaliações":"⭐" };
           return TABS_ADMIN.map((t,i)=>{
             const badgeCount = t === "Recados" ? state.recadosNovidades : (t === "Avaliações" ? state.avaliacoesNovidades : 0);
             const badge = badgeCount > 0 ? `<span class="badge-novidade">${badgeCount > 9 ? "9+" : badgeCount}</span>` : "";
@@ -679,7 +690,7 @@ function renderApp(){
       <div class="menu-mais">
         ${currentTabs().slice(7).map((t,idx)=>{
           const i = idx + 7;
-          const icones = { "Recados":"💬", "Tutorial":"📘", "Hoje":"📅" };
+          const icones = { "Envios":"📲", "Recados":"💬", "Tutorial":"📘", "Hoje":"📅" };
           const badgeCount = t === "Recados" ? state.recadosNovidades : 0;
           const badge = badgeCount > 0 ? `<span class="badge-novidade">${badgeCount > 9 ? "9+" : badgeCount}</span>` : "";
           return `<div class="menu-mais-item ${state.activeTab===i?'active':''}" data-tab-mais="${i}"><span>${icones[t]||"•"} ${t}</span>${badge}</div>`;
@@ -702,6 +713,7 @@ function renderTab(i){
     case "Treino (IA)": return tabTreino();
     case "Fechamento": return tabFechamento();
     case "Alunos": return tabAlunos();
+    case "Envios": return tabEnvios();
     case "Recados": return tabRecados();
     case "Tutorial": return tabTutorial();
     case "Hoje": return tabHoje();
@@ -970,6 +982,57 @@ function tabAnamnese(){
 }
 
 /* ===== TAB 1: MAPEAMENTO ===== */
+const THOMAS_RES = {
+  ok: "Normal — coxa apoiada no banco e joelho a ~90°",
+  psoas: "Coxa não encosta no banco (encurtamento do psoas/iliopsoas)",
+  reto: "Joelho estende (encurtamento do reto femoral)",
+  tfl: "Coxa abre/gira para fora (tensor da fáscia lata / banda iliotibial)"
+};
+function recalcularThomas(){
+  const t = state.testes.thomas;
+  const lados = [[t.dir,t.dirComp],[t.esq,t.esqComp]];
+  const avaliado = lados.some(([r,c]) => r || c);
+  if (!avaliado){ if (t.status === "ok" || t.status === "restrito") return; t.status = ""; return; }
+  const restrito = lados.some(([r,c]) => (r && r !== "ok") || c === "sim");
+  t.status = restrito ? "restrito" : "ok";
+}
+function thomasTexto(t){
+  if (!t) return "-";
+  const lado = (r,c) => {
+    const partes = [];
+    if (r) partes.push(THOMAS_RES[r] || r);
+    if (c === "sim") partes.push("compensou o quadril");
+    else if (c === "nao") partes.push("sem compensação");
+    return partes.length ? partes.join("; ") : "-";
+  };
+  const temLados = t.dir || t.esq || t.dirComp || t.esqComp;
+  if (!temLados) return `${t.status || "-"}${t.obs ? " " + t.obs : ""}`;
+  return `Direita: ${lado(t.dir,t.dirComp)} | Esquerda: ${lado(t.esq,t.esqComp)}${t.obs ? " — " + t.obs : ""}`;
+}
+function thomasCard(){
+  const t = state.testes.thomas;
+  const lado = (k, nome) => `
+    <div style="border:1.5px solid var(--line);border-radius:10px;padding:10px;margin-top:10px;background:#fff;">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:6px;">${nome}</div>
+      <select id="thomas_${k}" style="width:100%;padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);font-size:16px;">
+        <option value="" ${!t[k]?"selected":""}>— resultado —</option>
+        ${Object.keys(THOMAS_RES).map(r=>`<option value="${r}" ${t[k]===r?"selected":""}>${THOMAS_RES[r]}</option>`).join("")}
+      </select>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+        <span style="font-size:14.5px;color:var(--muted);">Compensou o quadril (pelve subiu, lombar arqueou)?</span>
+        <button type="button" class="status-btn restrito ${t[k+"Comp"]==="sim"?"selected":""}" data-thomascomp="${k}:sim" style="min-width:64px;flex:none;">Sim</button>
+        <button type="button" class="status-btn ok ${t[k+"Comp"]==="nao"?"selected":""}" data-thomascomp="${k}:nao" style="min-width:64px;flex:none;">Não</button>
+      </div>
+    </div>`;
+  return `
+  <div class="test-card">
+    <h4>2. Flexibilidade — Teste de Thomas (Quadril)</h4>
+    <p class="hint">Aluno na borda do banco, abraça um joelho contra o peito e solta a outra perna. Avalie a perna que ficou solta, uma de cada vez.</p>
+    ${lado("dir","Perna direita (solta)")}
+    ${lado("esq","Perna esquerda (solta)")}
+    <textarea placeholder="Observações / notas técnicas" id="obs_thomas" style="margin-top:10px;">${t.obs||""}</textarea>
+  </div>`;
+}
 function testCard(key, titulo, comando, extraTime){
   const t = state.testes[key];
   return `
@@ -990,7 +1053,7 @@ function tabMapeamento(){
   <p class="desc">Fase 2 — testes funcionais. Fase 3 — Overhead Squat (teste de ouro).</p>
 
   ${testCard("tornozelo","1. Mobilidade — Tornozelo (Teste da Parede)","Pé descalço a poucos centímetros da parede, calcanhar no chão, joelho tenta tocar a parede. Medir a distância pé-parede.")}
-  ${testCard("thomas","2. Flexibilidade — Teste de Thomas (Quadril)","Aluno na borda do banco, abraça um joelho, solta a outra perna.")}
+  ${thomasCard()}
   ${testCard("birddog","3. Coordenação — Bird-Dog (Core)","4 apoios, estende braço e perna opostos, tronco imóvel.")}
   ${testCard("stork","4. Equilíbrio — Stork Stand (Unipodal)","Um pé só, pé livre encostado no joelho de apoio. Cronometrar.", true)}
   ${testCard("prancha","5. Força Base — Prancha Abdominal","Antebraços e ponta dos pés, corpo alinhado. Cronometrar.", true)}
@@ -1091,6 +1154,14 @@ function tabMapeamento(){
     </div>
     <p class="hint" style="margin-top:10px;margin-bottom:0;">O aluno segura o bastão com as duas mãos e o mantém na vertical, acima da cabeça, durante todo o agachamento — em vez de fazer o "V" livre com os braços.</p>
     <textarea placeholder="Observações do Overhead Squat" id="obs_squat" style="margin-top:10px;">${state.squat.obs||""}</textarea>
+    <div class="field" style="margin-top:12px;">
+      <label>📷 Fotos do agachamento (até 2, ficam no histórico do aluno)</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;">
+        ${(state.fotos||[]).map((src,i)=>`<div style="position:relative;"><img src="${src}" alt="Foto ${i+1}" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block;"/><button type="button" onclick="removerFotoSquat(${i})" style="position:absolute;top:2px;right:2px;border:none;background:rgba(0,0,0,.6);color:#fff;border-radius:50%;width:26px;height:26px;cursor:pointer;">✕</button></div>`).join("")}
+        ${(state.fotos||[]).length < 2 ? `<label class="btn btn-outline" style="width:auto;padding:9px 14px;cursor:pointer;margin:0;">+ Adicionar foto<input type="file" id="inFotoSquat" accept="image/*" style="display:none;"/></label>` : ""}
+      </div>
+      ${state.fotoErro ? `<p class="hint" style="color:var(--restrito);">${escAttr(state.fotoErro)}</p>` : ""}
+    </div>
   </div>
 
   <div class="footer-nav">
@@ -1207,6 +1278,8 @@ ${parqTexto}
 
 Deficiências identificadas no Protocolo de Mapeamento Biomecânico:
 ${deficienciasTexto || "nenhuma deficiência marcada"}
+
+Teste de Thomas (quadril): ${thomasTexto(state.testes.thomas)}
 
 Capacidade física medida:
 - Flexão de braço: ${state.testes.flexao.reps || "não avaliado"} repetições (variante: ${state.testes.flexao.variante==='padrao'?'padrão':state.testes.flexao.variante==='joelho'?'joelho/regressão':'-'})
@@ -1421,7 +1494,10 @@ function tabFechamento(){
       <div class="txt" style="flex:1;">
         <b>Enviar por WhatsApp ao aluno</b>
         <span style="display:block;margin-bottom:6px;">Digite o número do aluno com DDD — a mensagem já inclui o link de avaliação anônima do atendimento</span>
-        <input type="text" id="inWpp" placeholder="Ex: 19999999999" value="${state.whatsapp}" style="width:100%;padding:9px 11px;border-radius:8px;border:1.5px solid var(--line);font-size:15px;"/>
+        <input type="text" id="inWpp" placeholder="Ex: 19999999999" value="${escAttr(state.whatsapp)}" style="width:100%;padding:9px 11px;border-radius:8px;border:1.5px solid var(--line);font-size:15px;"/>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:14px;color:var(--muted);"><input type="checkbox" id="chkAutorizou" ${state.contatoAutorizado ? "checked" : ""} style="width:18px;height:18px;"/>Aluno autorizou receber contato por WhatsApp</label>
+        ${state.envio ? `<div style="color:var(--ok);font-size:14px;margin-top:6px;">✅ Enviado em ${dataBR(state.envio.em)}${state.envio.por ? " por " + escAttr(state.envio.por) : ""}</div>` : ""}
+        <button class="btn btn-outline" id="btnSalvarContato" style="margin-top:8px;width:auto;padding:8px 14px;font-size:14.5px;">💾 Salvar contato para enviar depois (aba Envios)</button>
       </div>
       <button class="btn btn-navy" id="btnWpp">Enviar</button>
     </div>
@@ -1560,6 +1636,7 @@ function gerarPDF(incluirTreino, dadosOverride){
   section("Mapeamento Biomecânico");
   Object.entries(d.testes).forEach(([k,t])=>{
     if (k === "slr" || k === "flexao" || k === "curlup") return;
+    if (k === "thomas"){ line(`Thomas (Quadril): ${thomasTexto(t)}`); return; }
     line(`${k}: ${t.status || "-"} ${t.tempo?`(${t.tempo}s)`:""} ${t.obs?"- "+t.obs:""}`);
   });
   line(`Elevação da Perna Reta (Isquiotibiais) — Direito: ${d.testes.slr.dir||"-"} | Esquerdo: ${d.testes.slr.esq||"-"} ${d.testes.slr.obs?"- "+d.testes.slr.obs:""}`);
@@ -1714,7 +1791,13 @@ function getAtendimentoId(){
   return state.atendimentoId;
 }
 
-async function salvarAtendimento(silencioso){
+let _filaSalvar = Promise.resolve();
+function salvarAtendimento(silencioso){
+  const p = _filaSalvar.then(()=> salvarAtendimentoReal(silencioso));
+  _filaSalvar = p.catch(()=>{});
+  return p;
+}
+async function salvarAtendimentoReal(silencioso){
   const dono = donoAtendimento();
   const registro = {
     id: getAtendimentoId(),
@@ -1731,6 +1814,11 @@ async function salvarAtendimento(silencioso){
   };
   registro.ultimaEdicao = { por: state.professor, em: registro.atualizadoEm };
   registro.ofereceDesconto = state.ofereceDesconto !== false;
+  registro.whatsapp = (state.whatsapp || "").replace(/\D/g,"");
+  registro.contatoAutorizado = !!state.contatoAutorizado;
+  if (state.envio) registro.envio = state.envio;
+  if (state.fotos && state.fotos.length) registro.fotos = state.fotos;
+  if (state.reavaliacaoDe) registro.reavaliacaoDe = state.reavaliacaoDe;
   const cupomAtual = cupomParaAtendimento();
   if (cupomAtual) registro.cupom = cupomAtual;
   state.atendimentoDono = dono;
@@ -1741,15 +1829,16 @@ async function salvarAtendimento(silencioso){
       if (!existente.empty){
         const anterior = existente.docs[0].data();
         if (anterior.venda) registro.venda = anterior.venda;
+        if (anterior.envio && !registro.envio) registro.envio = anterior.envio;
         await existente.docs[0].ref.set(registro);
       } else {
-        await db.collection("atendimentos").add(registro);
+        await db.collection("atendimentos").doc(registro.id).set(registro);
       }
     } else {
       const key = "skyfit_atendimentos";
       const arr = JSON.parse(localStorage.getItem(key) || "[]");
       const idx = arr.findIndex(a=>a.id===registro.id);
-      if (idx >= 0){ if (arr[idx].venda) registro.venda = arr[idx].venda; arr[idx] = registro; } else arr.push(registro);
+      if (idx >= 0){ if (arr[idx].venda) registro.venda = arr[idx].venda; if (arr[idx].envio && !registro.envio) registro.envio = arr[idx].envio; arr[idx] = registro; } else arr.push(registro);
       localStorage.setItem(key, JSON.stringify(arr));
     }
     state.saveStatus = "ok";
@@ -1773,14 +1862,46 @@ function marcarNuvemStatus(ok){
   }
 }
 
+/* ---------- RASCUNHO LOCAL (sobrevive se o celular recarregar a página) ---------- */
+const CAMPOS_RASCUNHO = ["aluno","anamnese","testes","squat","deficienciasSelecionadas","deficienciaObsExtra","treino","atendimentoId","atendimentoDono","atendimentoCupom","ofereceDesconto","criadoEmOriginal","activeTab","whatsapp","envio","contatoAutorizado","fotos","reavaliacaoDe"];
+function salvarRascunho(){
+  try{
+    if (state.screen !== "app" || state.role === "admin") return;
+    if (!state.atendimentoId && !(state.aluno && state.aluno.nome && state.aluno.nome.trim())) return;
+    const dados = {};
+    CAMPOS_RASCUNHO.forEach(k => dados[k] = state[k]);
+    localStorage.setItem("skyfit_rascunho", JSON.stringify({ professor: state.professor, em: new Date().toISOString(), dados }));
+  }catch(e){ console.warn("rascunho:", e); }
+}
+function restaurarRascunho(){
+  try{
+    const raw = localStorage.getItem("skyfit_rascunho");
+    if (!raw) return false;
+    const r = JSON.parse(raw);
+    if (!r || r.professor !== state.professor || state.role === "admin" || !r.dados) return false;
+    if (Date.now() - new Date(r.em).getTime() > 3*86400000) return false;
+    CAMPOS_RASCUNHO.forEach(k => { if (r.dados[k] !== undefined) state[k] = r.dados[k]; });
+    if (!(state.activeTab >= 0 && state.activeTab < currentTabs().length)) state.activeTab = 0;
+    return true;
+  }catch(e){ return false; }
+}
+function limparRascunho(){ try{ localStorage.removeItem("skyfit_rascunho"); }catch(e){} }
+let _tRascunho = null;
+function agendarRascunho(){ clearTimeout(_tRascunho); _tRascunho = setTimeout(salvarRascunho, 800); }
+document.addEventListener("input", agendarRascunho, true);
+document.addEventListener("change", agendarRascunho, true);
+document.addEventListener("click", agendarRascunho, true);
+window.addEventListener("pagehide", salvarRascunho);
+
 /* ---------- AUTOSALVAMENTO (rascunho automático, silencioso) ---------- */
 function autosalvarSeNecessario(){
+  salvarRascunho();
   if (state.screen === "app" && state.aluno && state.aluno.nome && state.aluno.nome.trim()){
     salvarAtendimento(true);
   }
 }
 setInterval(autosalvarSeNecessario, 15000);
-document.addEventListener("visibilitychange", ()=>{ if (document.hidden) autosalvarSeNecessario(); });
+document.addEventListener("visibilitychange", ()=>{ if (document.hidden){ salvarRascunho(); autosalvarSeNecessario(); } });
 
 /* ---------- CARREGAR ATENDIMENTO PARA EDIÇÃO ---------- */
 function carregarParaEdicao(a){
@@ -1797,6 +1918,11 @@ function carregarParaEdicao(a){
   state.atendimentoCupom = a.cupom || null;
   state.cupomForm = null;
   state.ofereceDesconto = a.ofereceDesconto !== false;
+  state.whatsapp = a.whatsapp || "";
+  state.envio = a.envio || null;
+  state.fotos = a.fotos || [];
+  state.reavaliacaoDe = a.reavaliacaoDe || null;
+  state.contatoAutorizado = !!a.contatoAutorizado;
   state.criadoEmOriginal = a.criadoEm || null;
   state.saveStatus = "";
   state.saveError = "";
@@ -1838,10 +1964,10 @@ async function carregarAtendimentos(){
     if (firebaseReady && db){
       const snap = await db.collection("atendimentos").get();
       state.firestoreErro = "";
-      return snap.docs.map(d=>d.data());
+      return snap.docs.map(d=>({ ...d.data(), __doc: d.id }));
     } else {
       const key = "skyfit_atendimentos";
-      return JSON.parse(localStorage.getItem(key) || "[]");
+      return JSON.parse(localStorage.getItem(key) || "[]").map((a,i)=>({ ...a, __doc: "L"+i }));
     }
   }catch(e){
     console.error(e);
@@ -1931,6 +2057,19 @@ function tabAlunos(){
     ${(state.role !== "admin" && a.professor === state.professor)
       ? `<button class="btn btn-outline" style="margin-top:10px;width:auto;padding:9px 16px;font-size:14.5px;" onclick="carregarParaEdicao(state.alunoSelecionado)">✏️ Editar este atendimento</button>`
       : `<p class="hint" style="margin-top:10px;">Somente o professor ${escAttr(a.professor || "responsável")} pode editar este atendimento.</p>`}
+    ${state.role !== "admin" ? `<button class="btn btn-navy" style="margin-top:10px;width:auto;padding:9px 16px;font-size:14.5px;" onclick="iniciarReavaliacao()">🔁 Reavaliar este aluno</button>` : ""}
+    ${state.role === "admin" ? `
+    <div class="summary-mini" style="margin-top:10px;border:1.5px solid var(--line);">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:8px;">Correções do administrador</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <select id="selTrocaProf" style="flex:1;min-width:140px;padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);font-size:16px;">
+          <option value="">Trocar professor...</option>
+          ${(state.professoresLista||[]).map(p=>`<option value="${escAttr(p.nome)}">${escAttr(p.nome)}</option>`).join("")}
+        </select>
+        <button class="btn btn-outline" onclick="trocarProfessorAtendimento()" style="width:auto;padding:8px 14px;">Trocar</button>
+        <button class="btn btn-outline" onclick="excluirAtendimentoAdmin()" style="width:auto;padding:8px 14px;color:var(--restrito);border-color:var(--restrito);">🗑️ Excluir atendimento</button>
+      </div>
+    </div>` : ""}
 
     <div class="block-title" style="margin-top:16px;">Anamnese</div>
     <p><b>Objetivo:</b> ${a.anamnese?.objetivo || "-"}</p>
@@ -1942,7 +2081,7 @@ function tabAlunos(){
 
     <div class="block-title" style="margin-top:16px;">Mapeamento (Testes)</div>
     <p><b>Tornozelo:</b> ${a.testes?.tornozelo?.status || "-"} ${a.testes?.tornozelo?.obs || ""}</p>
-    <p><b>Thomas (Quadril):</b> ${a.testes?.thomas?.status || "-"} ${a.testes?.thomas?.obs || ""}</p>
+    <p><b>Thomas (Quadril):</b> ${thomasTexto(a.testes?.thomas)}</p>
     <p><b>Bird-Dog:</b> ${a.testes?.birddog?.status || "-"} ${a.testes?.birddog?.obs || ""}</p>
     <p><b>Stork Stand:</b> ${a.testes?.stork?.status || "-"} (${a.testes?.stork?.tempo || "-"}s)</p>
     <p><b>Prancha:</b> ${a.testes?.prancha?.status || "-"} (${a.testes?.prancha?.tempo || "-"}s)</p>
@@ -1950,6 +2089,9 @@ function tabAlunos(){
     <p><b>Flexão de Braço:</b> ${a.testes?.flexao?.variante || "-"} — ${a.testes?.flexao?.reps || "-"} reps</p>
     <p><b>Curl-up (1 min):</b> ${a.testes?.curlup?.reps || "-"} reps</p>
     <p><b>Overhead Squat:</b> Calcanhares: ${a.squat?.calcanhares || "-"} | Joelhos: ${a.squat?.joelhos || "-"} | Tronco: ${a.squat?.tronco || "-"} | Bastão: ${a.squat?.bastao || "-"}</p>
+
+    ${(a.fotos && a.fotos.length) ? `<div class="block-title" style="margin-top:16px;">📷 Fotos do agachamento</div><div style="display:flex;gap:10px;flex-wrap:wrap;">${a.fotos.map(src=>`<img src="${src}" style="max-width:48%;border-radius:8px;border:1px solid var(--line);"/>`).join("")}</div>` : ""}
+    ${htmlEvolucao(a)}
 
     <div class="block-title" style="margin-top:16px;">Deficiências Confirmadas</div>
     ${defs.length === 0 ? `<p class="hint">Nenhuma deficiência registrada.</p>` : defs.map(k => `<p>• ${BASE_DEFICIENCIAS[k]?.titulo || k}</p>`).join("")}
@@ -1973,22 +2115,344 @@ function tabAlunos(){
     <label>Nome do aluno</label>
     <input type="text" id="alunoBuscaInput" placeholder="Digite o nome..." value="${state.alunoBuscaQuery}" oninput="state.alunoBuscaQuery=this.value">
   </div>
-  <button class="btn btn-navy" onclick="buscarAlunos(state.alunoBuscaQuery)" style="width:auto;padding:10px 20px;">Buscar</button>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <button class="btn btn-navy" onclick="state.alunoReavaliarModo=false;buscarAlunos(state.alunoBuscaQuery)" style="width:auto;padding:10px 20px;">Buscar</button>
+    <button class="btn btn-outline" onclick="buscarParaReavaliar()" style="width:auto;padding:10px 16px;">🔁 Quem precisa de reavaliação (30+ dias)</button>
+  </div>
 
   ${state.alunoBuscaLoading ? `<div class="ai-box" style="margin-top:14px;"><div class="spinner"></div><p style="color:var(--muted);font-size:15px;margin:0;">Buscando...</p></div>` : ""}
 
   ${state.alunoBuscaResultados && !state.alunoBuscaLoading ? `
-    <div class="block-title" style="margin-top:16px;">Resultados (${state.alunoBuscaResultados.length})</div>
-    ${state.alunoBuscaResultados.length === 0 ? `<p class="hint">Nenhum atendimento encontrado.</p>` : state.alunoBuscaResultados.map((a,i) => `
+    <div class="block-title" style="margin-top:16px;">${state.alunoReavaliarModo ? "Para reavaliar" : "Resultados"} (${state.alunoBuscaResultados.length})</div>
+    ${state.role === "admin" ? `<button class="btn btn-outline" onclick="limparAtendimentosDuplicados()" style="width:auto;padding:8px 14px;margin-bottom:10px;font-size:14.5px;">🧹 Limpar cópias repetidas do mesmo atendimento</button>` : ""}
+    ${state.alunoBuscaResultados.length === 0 ? `<p class="hint">Nenhum atendimento encontrado.</p>` : (()=>{
+      const chaveDup = a => `${(a.aluno?.nome||"").trim().toLowerCase()}|${a.professor||""}|${a.aluno?.data||""}`;
+      const cont = {};
+      state.alunoBuscaResultados.forEach(a => { const k = chaveDup(a); cont[k] = (cont[k]||0) + 1; });
+      return state.alunoBuscaResultados.map((a,i) => `
       <div class="summary-mini" style="margin-bottom:8px;cursor:pointer;" onclick="abrirAluno(${i})">
-        <div style="font-weight:700;color:var(--navy);">${a.aluno?.nome || "-"}</div>
-        <div style="color:var(--muted);font-size:14.5px;">Atendimento em ${formatarDataBR(a.aluno?.data)} — Professor: ${a.professor || "-"}</div>
+        <div style="font-weight:700;color:var(--navy);">${a.aluno?.nome || "-"}${state.role === "admin" && cont[chaveDup(a)] > 1 ? ' <span style="color:var(--restrito);font-size:13px;">⚠️ possível duplicado</span>' : ""}</div>
+        <div style="color:var(--muted);font-size:14.5px;">Atendimento em ${formatarDataBR(a.aluno?.data)} — Professor: ${a.professor || "-"}${state.alunoReavaliarModo && a.aluno?.data ? " — há " + Math.floor((Date.now() - new Date(a.aluno.data).getTime())/86400000) + " dias" : ""}</div>
       </div>
-    `).join("")}
+    `).join("");
+    })()}
   ` : ""}
   `;
 }
 
+/* ---------- WHATSAPP: MENSAGEM, CONTATO SALVO E ABA ENVIOS ---------- */
+function numeroWpp(n){
+  const d = String(n||"").replace(/\D/g,"");
+  if (!d) return "";
+  return (d.length >= 12 && d.startsWith("55")) ? d : "55" + d;
+}
+function formatarFone(n){
+  let d = String(n||"").replace(/\D/g,"");
+  if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+  return d;
+}
+function mensagemWhatsApp(r){
+  const baseUrl = window.location.href.split("?")[0];
+  const linkAvaliacao = `${baseUrl}?avaliar=${r.id}`;
+  const linkPdf = `${baseUrl}?pdf=${r.id}`;
+  const c = r.cupom;
+  const cupomValido = c && c.codigo && (!c.validoAte || new Date(c.validoAte) >= new Date());
+  const planosTxt = cupomValido && c.planos ? "\n" + c.planos.map(p => `• ${descPlano(p)}`).join("\n") : "";
+  const cupomTxt = cupomValido ? `\n\n🎟️ Presente do professor ${c.professor}: cupom *${c.codigo}* na sua matrícula${planosTxt}\nVálido até ${dataBR(c.validoAte)}. Toque para garantir:\n${linkCupom(c)}` : "";
+  const primeiro = ((r.nome || "")).trim().split(/\s+/)[0] || "";
+  return `*Skyfit Park Palmeiras* 💪\nOlá${primeiro ? ", " + primeiro : ""}! Seu mapeamento biomecânico com o professor ${r.professor} está pronto:\n📄 ${linkPdf}${cupomTxt}\n\n⭐ Avalie seu atendimento em 1 minuto:\n${linkAvaliacao}`;
+}
+async function abrirEnvios(){
+  state.enviosLoading = true;
+  render();
+  const todos = await carregarAtendimentos();
+  state.enviosData = todos
+    .filter(a => String(a.whatsapp||"").replace(/\D/g,"").length >= 10)
+    .sort((a,b)=> new Date(b.atualizadoEm||b.criadoEm||0) - new Date(a.atualizadoEm||a.criadoEm||0));
+  state.enviosLoading = false;
+  render();
+}
+async function gravarEnvio(a, envio){
+  if (firebaseReady && db){
+    await db.collection("atendimentos").doc(a.__doc).update(envio ? { envio } : { envio: firebase.firestore.FieldValue.delete() });
+  } else {
+    const arr = JSON.parse(localStorage.getItem("skyfit_atendimentos") || "[]");
+    const i = arr.findIndex(x => x.id === a.id);
+    if (i >= 0){ if (envio) arr[i].envio = envio; else delete arr[i].envio; localStorage.setItem("skyfit_atendimentos", JSON.stringify(arr)); }
+  }
+  if (envio) a.envio = envio; else delete a.envio;
+}
+function enviarWhatsAppPendente(i){
+  const a = (state.enviosData||[])[i];
+  if (!a) return;
+  const texto = mensagemWhatsApp({ id:a.id, nome:a.aluno && a.aluno.nome, professor:a.professor || "", cupom:a.cupom });
+  window.open(`https://wa.me/${numeroWpp(a.whatsapp)}?text=${encodeURIComponent(texto)}`, "_blank");
+  gravarEnvio(a, { status:"enviado", em:new Date().toISOString(), por:state.professor })
+    .then(()=> render())
+    .catch(e=>{ console.error(e); toast("Abri o WhatsApp, mas não consegui marcar como enviado: " + (e && e.message ? e.message : "falha")); });
+}
+function enviarLembreteCupom(i){
+  const a = (state.enviosData||[])[i];
+  if (!a || !a.cupom) return;
+  const dias = Math.ceil((new Date(a.cupom.validoAte) - new Date()) / 86400000);
+  const quando = dias <= 0 ? "vence hoje" : dias === 1 ? "vence amanhã" : `vence em ${dias} dias (${dataBR(a.cupom.validoAte)})`;
+  const primeiro = ((a.aluno && a.aluno.nome) || "").trim().split(/\s+/)[0] || "";
+  const texto = `Oi${primeiro ? ", " + primeiro : ""}! Aqui é da Skyfit Park Palmeiras 💪\nO desconto que o professor ${a.professor || ""} reservou para a sua matrícula ${quando}.\nGaranta o seu aqui:\n${linkCupom(a.cupom)}`;
+  window.open(`https://wa.me/${numeroWpp(a.whatsapp)}?text=${encodeURIComponent(texto)}`, "_blank");
+  const fu = { em:new Date().toISOString(), por:state.professor, n:((a.followup && a.followup.n) || 0) + 1 };
+  const grava = (firebaseReady && db)
+    ? db.collection("atendimentos").doc(a.__doc).update({ followup: fu })
+    : Promise.resolve().then(()=>{ const arr = JSON.parse(localStorage.getItem("skyfit_atendimentos") || "[]"); const k = arr.findIndex(x => x.id === a.id); if (k >= 0){ arr[k].followup = fu; localStorage.setItem("skyfit_atendimentos", JSON.stringify(arr)); } });
+  grava.then(()=>{ a.followup = fu; render(); }).catch(e=>{ console.error(e); toast("Abri o WhatsApp, mas não consegui registrar o lembrete."); });
+}
+async function marcarEnvio(i, enviado){
+  const a = (state.enviosData||[])[i];
+  if (!a) return;
+  try{ await gravarEnvio(a, enviado ? { status:"enviado", em:new Date().toISOString(), por:state.professor } : null); render(); }
+  catch(e){ console.error(e); toast("Erro: " + (e && e.message ? e.message : "falha desconhecida")); }
+}
+async function removerContatoEnvio(i){
+  const a = (state.enviosData||[])[i];
+  if (!a || !confirm(`Apagar o WhatsApp salvo de ${a.aluno && a.aluno.nome || "este aluno"}? O atendimento continua, só o número é removido.`)) return;
+  try{
+    if (firebaseReady && db) await db.collection("atendimentos").doc(a.__doc).update({ whatsapp:"" });
+    else {
+      const arr = JSON.parse(localStorage.getItem("skyfit_atendimentos") || "[]");
+      const k = arr.findIndex(x => x.id === a.id); if (k >= 0){ arr[k].whatsapp = ""; localStorage.setItem("skyfit_atendimentos", JSON.stringify(arr)); }
+    }
+    state.enviosData.splice(i,1);
+    toast("Número removido.");
+    render();
+  }catch(e){ console.error(e); toast("Erro: " + (e && e.message ? e.message : "falha desconhecida")); }
+}
+function tabEnvios(){
+  if (state.enviosLoading || !state.enviosData){
+    if (!state.enviosLoading) abrirEnvios();
+    return `<h2>Envios por WhatsApp</h2><div class="ai-box"><div class="spinner"></div><p style="color:var(--muted);font-size:15px;margin:0;">Carregando...</p></div>`;
+  }
+  const lista = state.enviosData;
+  const idxPend = [], idxEnv = [];
+  lista.forEach((a,i)=> (a.envio && a.envio.status === "enviado" ? idxEnv : idxPend).push(i));
+  idxEnv.sort((x,y)=> new Date(lista[y].envio.em||0) - new Date(lista[x].envio.em||0));
+  const card = (i, enviado) => { const a = lista[i]; return `
+    <div class="summary-mini" style="margin-bottom:8px;">
+      <div style="font-weight:700;color:var(--navy);">${escAttr(a.aluno?.nome || "-")}</div>
+      <div style="color:var(--muted);font-size:14.5px;">📲 ${escAttr(formatarFone(a.whatsapp))} • Professor ${escAttr(a.professor||"-")} • ${formatarDataBR(a.aluno?.data)}${a.cupom ? " • 🎟️ " + escAttr(a.cupom.codigo) : ""}</div>
+      ${enviado ? `<div style="color:var(--ok);font-size:14px;margin-top:2px;">✅ Enviado em ${dataBR(a.envio.em)}${a.envio.por ? " por " + escAttr(a.envio.por) : ""}</div>` : ""}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn btn-navy" onclick="enviarWhatsAppPendente(${i})" style="width:auto;padding:8px 14px;font-size:14.5px;">${enviado ? "📲 Reenviar" : "📲 Enviar no WhatsApp"}</button>
+        ${enviado
+          ? `<button class="btn btn-outline" onclick="marcarEnvio(${i}, false)" style="width:auto;padding:8px 12px;font-size:14px;">Voltar p/ pendente</button>`
+          : `<button class="btn btn-outline" onclick="marcarEnvio(${i}, true)" style="width:auto;padding:8px 12px;font-size:14px;">Já enviei</button>`}
+        <button class="btn btn-outline" onclick="removerContatoEnvio(${i})" style="width:auto;padding:8px 12px;font-size:14px;color:var(--restrito);border-color:var(--restrito);">Apagar número</button>
+      </div>
+    </div>`; };
+  return `
+  <h2>Envios por WhatsApp</h2>
+  <p class="desc">Alunos com o WhatsApp salvo no Fechamento. Use este tablet (com o WhatsApp da academia) para enviar o PDF, o cupom e o link de avaliação.</p>
+  ${state.firestoreErro ? `<div class="err" style="display:block;margin-bottom:14px;">⚠️ Erro ao ler a nuvem: ${escAttr(state.firestoreErro)}.</div>` : ""}
+  <div class="block-title">Pendentes de envio (${idxPend.length})</div>
+  ${idxPend.length === 0 ? `<p class="hint">Nenhum aluno aguardando envio.</p>` : idxPend.map(i => card(i,false)).join("")}
+  ${(()=>{
+    const agora = new Date();
+    const lem = idxEnv.filter(i => { const a = lista[i]; return a.cupom && a.cupom.validoAte && new Date(a.cupom.validoAte) >= agora && !fechouVenda(a); })
+      .sort((x,y)=> new Date(lista[x].cupom.validoAte) - new Date(lista[y].cupom.validoAte));
+    if (!lem.length) return "";
+    return `<div class="block-title" style="margin-top:18px;">⏰ Lembretes de cupom (${lem.length})</div>
+    <p class="hint" style="margin:0 0 8px;">Alunos que receberam o cupom, ainda não fecharam e o desconto está perto de vencer.</p>` + lem.map(i => {
+      const a = lista[i];
+      const dias = Math.ceil((new Date(a.cupom.validoAte) - agora) / 86400000);
+      return `<div class="summary-mini" style="margin-bottom:8px;">
+        <div style="font-weight:700;color:var(--navy);">${escAttr(a.aluno?.nome || "-")}</div>
+        <div style="color:var(--muted);font-size:14.5px;">📲 ${escAttr(formatarFone(a.whatsapp))} • cupom ${escAttr(a.cupom.codigo)} • <b style="color:${dias<=2?"var(--restrito)":"var(--navy)"};">${dias<=0?"vence hoje":dias===1?"vence amanhã":"vence em "+dias+" dias"}</b> (${dataBR(a.cupom.validoAte)})</div>
+        ${a.followup ? `<div style="color:var(--ok);font-size:14px;margin-top:2px;">✅ Lembrete enviado em ${dataBR(a.followup.em)}${a.followup.por ? " por " + escAttr(a.followup.por) : ""}${a.followup.n > 1 ? " (" + a.followup.n + "x)" : ""}</div>` : ""}
+        <button class="btn btn-navy" onclick="enviarLembreteCupom(${i})" style="margin-top:8px;width:auto;padding:8px 14px;font-size:14.5px;">${a.followup ? "📲 Lembrar de novo" : "📲 Lembrar no WhatsApp"}</button>
+      </div>`;
+    }).join("");
+  })()}
+  <div class="block-title" style="margin-top:18px;">Enviados (${idxEnv.length})</div>
+  ${idxEnv.length === 0 ? `<p class="hint">Nenhum envio registrado ainda.</p>` : idxEnv.slice(0,20).map(i => card(i,true)).join("")}
+  <button class="btn btn-outline" onclick="state.enviosData=null;render()" style="margin-top:14px;width:100%;">↻ Atualizar</button>
+  `;
+}
+
+/* ---------- CORREÇÕES DO ADMIN (excluir, duplicados, trocar professor) ---------- */
+function invalidarCachesAdmin(){
+  state.avaliacoesData = null; state.statsData = null; state.hojeData = null; state.vendasData = null;
+}
+async function apagarDocsPorChave(colecao, chaves){
+  if (!chaves.length) return;
+  if (firebaseReady && db){
+    for (const k of chaves) await db.collection(colecao).doc(k).delete();
+  } else {
+    const lsKey = colecao === "avaliacoes" ? "skyfit_avaliacoes" : "skyfit_atendimentos";
+    const arr = JSON.parse(localStorage.getItem(lsKey) || "[]");
+    const idx = new Set(chaves.map(k => parseInt(String(k).slice(1),10)));
+    localStorage.setItem(lsKey, JSON.stringify(arr.filter((_,i)=> !idx.has(i))));
+  }
+}
+function chavesDuplicadasExatas(lista, campoId){
+  const grupos = {};
+  lista.forEach(x => { const id = campoId(x); if (id) (grupos[id] = grupos[id] || []).push(x); });
+  const apagar = [];
+  Object.values(grupos).forEach(g => {
+    if (g.length < 2) return;
+    g.sort((a,b)=> new Date(a.criadoEm||a.atualizadoEm||0) - new Date(b.criadoEm||b.atualizadoEm||0));
+    const manter = campoId === idAtend ? g[g.length-1] : g[0];
+    g.forEach(x => { if (x !== manter) apagar.push(x.__doc); });
+  });
+  return apagar;
+}
+const idAtend = x => x.id;
+const idAval = x => x.atendimentoId;
+async function excluirAtendimentoAdmin(){
+  const a = state.alunoSelecionado;
+  if (!a || state.role !== "admin") return;
+  if (!confirm(`Excluir o atendimento de ${a.aluno?.nome || "este aluno"} (professor ${a.professor || "-"})? Não dá para desfazer.`)) return;
+  const comAval = confirm("Apagar também as avaliações recebidas deste atendimento? (OK = apagar também / Cancelar = manter as avaliações)");
+  try{
+    const todos = await carregarAtendimentos();
+    await apagarDocsPorChave("atendimentos", todos.filter(x => x.id === a.id).map(x => x.__doc));
+    if (comAval){
+      const avs = await carregarAvaliacoes();
+      await apagarDocsPorChave("avaliacoes", avs.filter(x => x.atendimentoId === a.id).map(x => x.__doc));
+    }
+    invalidarCachesAdmin();
+    state.alunoSelecionado = null;
+    toast("Atendimento excluído.");
+    await buscarAlunos(state.alunoBuscaQuery);
+  }catch(e){ console.error(e); toast("Erro ao excluir: " + (e && e.message ? e.message : "falha desconhecida")); }
+}
+async function trocarProfessorAtendimento(){
+  const a = state.alunoSelecionado;
+  const sel = document.getElementById("selTrocaProf");
+  if (!a || !sel || !sel.value || state.role !== "admin") return;
+  const novo = sel.value;
+  if (novo === a.professor){ toast("Esse já é o professor do atendimento."); return; }
+  if (!confirm(`Passar este atendimento (e as avaliações dele) de ${a.professor || "-"} para ${novo}?`)) return;
+  try{
+    const todos = await carregarAtendimentos();
+    const meus = todos.filter(x => x.id === a.id);
+    const avs = (await carregarAvaliacoes()).filter(x => x.atendimentoId === a.id);
+    const ajusta = (x)=>{ const { __doc, ...d } = x; d.professor = novo; if (d.cupom) d.cupom = { ...d.cupom, professor: novo }; return d; };
+    if (firebaseReady && db){
+      for (const x of meus) await db.collection("atendimentos").doc(x.__doc).set(ajusta(x));
+      for (const x of avs) await db.collection("avaliacoes").doc(x.__doc).update({ professorAtendimento: novo });
+    } else {
+      const arr = JSON.parse(localStorage.getItem("skyfit_atendimentos") || "[]");
+      arr.forEach((x,i)=>{ if (x.id === a.id) arr[i] = ajusta(x); });
+      localStorage.setItem("skyfit_atendimentos", JSON.stringify(arr));
+      const arrA = JSON.parse(localStorage.getItem("skyfit_avaliacoes") || "[]");
+      arrA.forEach(x=>{ if (x.atendimentoId === a.id) x.professorAtendimento = novo; });
+      localStorage.setItem("skyfit_avaliacoes", JSON.stringify(arrA));
+    }
+    invalidarCachesAdmin();
+    toast("Professor alterado.");
+    state.alunoSelecionado = null;
+    await buscarAlunos(state.alunoBuscaQuery);
+  }catch(e){ console.error(e); toast("Erro ao trocar: " + (e && e.message ? e.message : "falha desconhecida")); }
+}
+async function limparAtendimentosDuplicados(){
+  const todos = await carregarAtendimentos();
+  const apagar = chavesDuplicadasExatas(todos, idAtend);
+  if (!apagar.length){ toast("Nenhum duplicado exato encontrado."); return; }
+  if (!confirm(`Encontrei ${apagar.length} registro(s) repetido(s) do mesmo atendimento. Remover as cópias e manter a mais recente?`)) return;
+  try{ await apagarDocsPorChave("atendimentos", apagar); invalidarCachesAdmin(); toast("Duplicados removidos."); await buscarAlunos(state.alunoBuscaQuery); }
+  catch(e){ console.error(e); toast("Erro: " + (e && e.message ? e.message : "falha desconhecida")); }
+}
+async function excluirAvaliacaoAdmin(chave){
+  if (state.role !== "admin") return;
+  if (!confirm("Excluir esta avaliação? Não dá para desfazer.")) return;
+  try{ await apagarDocsPorChave("avaliacoes", [chave]); invalidarCachesAdmin(); toast("Avaliação excluída."); render(); }
+  catch(e){ console.error(e); toast("Erro ao excluir: " + (e && e.message ? e.message : "falha desconhecida")); }
+}
+async function removerAvaliacoesDuplicadas(){
+  const todas = await carregarAvaliacoes();
+  const apagar = chavesDuplicadasExatas(todas, idAval);
+  if (!apagar.length){ toast("Nenhuma avaliação duplicada."); return; }
+  if (!confirm(`Encontrei ${apagar.length} avaliação(ões) repetida(s) do mesmo atendimento. Manter só a primeira de cada uma?`)) return;
+  try{ await apagarDocsPorChave("avaliacoes", apagar); invalidarCachesAdmin(); toast("Duplicadas removidas."); render(); }
+  catch(e){ console.error(e); toast("Erro: " + (e && e.message ? e.message : "falha desconhecida")); }
+}
+function removerFotoSquat(i){
+  state.fotos = (state.fotos||[]).filter((_,k)=> k !== i);
+  if (state.aluno && state.aluno.nome && state.aluno.nome.trim()) salvarAtendimento(true);
+  render();
+}
+function normalizarNome(n){ return String(n||"").normalize("NFD").replace(/[̀-ͯ]/g,"").trim().toLowerCase().replace(/\s+/g," "); }
+function iniciarReavaliacao(){
+  const a = state.alunoSelecionado;
+  if (!a || state.role === "admin") return;
+  if (state.aluno && state.aluno.nome && state.aluno.nome.trim() && state.atendimentoId && !confirm("Você tem um atendimento em andamento (já salvo automaticamente). Abrir a reavaliação mesmo assim?")) return;
+  resetarFluxo();
+  state.aluno = { ...JSON.parse(JSON.stringify(a.aluno || {})), data: new Date().toISOString().slice(0,10), primeiroAtendimento: false };
+  state.anamnese = { ...state.anamnese, ...JSON.parse(JSON.stringify(a.anamnese || {})) };
+  state.whatsapp = a.whatsapp || "";
+  state.reavaliacaoDe = a.id;
+  state.alunoSelecionado = null;
+  state.activeTab = currentTabs().indexOf("Mapeamento");
+  toast("Reavaliação iniciada — refaça os testes e compare com a avaliação anterior.");
+  render();
+  requestAnimationFrame(()=> window.scrollTo(0,0));
+}
+async function buscarParaReavaliar(){
+  state.alunoBuscaLoading = true; state.alunoReavaliarModo = true; render();
+  const todos = await carregarAtendimentos();
+  const ultimo = {};
+  todos.forEach(a => {
+    const k = normalizarNome(a.aluno && a.aluno.nome); if (!k) return;
+    const t = new Date((a.aluno && a.aluno.data) || a.criadoEm || 0).getTime();
+    if (!ultimo[k] || t > ultimo[k].t) ultimo[k] = { t, a };
+  });
+  const limite = Date.now() - 30*86400000;
+  state.alunoBuscaResultados = Object.values(ultimo).filter(x => x.t && x.t <= limite).sort((x,y)=> x.t - y.t).map(x => x.a);
+  state.alunoBuscaLoading = false;
+  render();
+}
+function linhasEvolucao(){
+  const num = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+  return [
+    { nome:"Tornozelo", v:a => a.testes?.tornozelo?.status || "-" },
+    { nome:"Thomas (quadril)", v:a => a.testes?.thomas ? thomasTexto(a.testes.thomas) : "-" },
+    { nome:"Bird-Dog", v:a => a.testes?.birddog?.status || "-" },
+    { nome:"Stork (s)", v:a => a.testes?.stork?.tempo || "-", n:a => num(a.testes?.stork?.tempo) },
+    { nome:"Prancha (s)", v:a => a.testes?.prancha?.tempo || "-", n:a => num(a.testes?.prancha?.tempo) },
+    { nome:"Perna reta dir.", v:a => a.testes?.slr?.dir || "-" },
+    { nome:"Perna reta esq.", v:a => a.testes?.slr?.esq || "-" },
+    { nome:"Flexão (reps)", v:a => a.testes?.flexao?.reps || "-", n:a => num(a.testes?.flexao?.reps) },
+    { nome:"Curl-up (reps)", v:a => a.testes?.curlup?.reps || "-", n:a => num(a.testes?.curlup?.reps) },
+    { nome:"Squat: calcanhares", v:a => a.squat?.calcanhares || "-" },
+    { nome:"Squat: joelhos", v:a => a.squat?.joelhos || "-" },
+    { nome:"Squat: tronco", v:a => a.squat?.tronco || "-" },
+    { nome:"Squat: bastão", v:a => a.squat?.bastao || "-" }
+  ];
+}
+function htmlEvolucao(a){
+  const base = state.alunoBuscaResultados || [a];
+  const k = normalizarNome(a.aluno && a.aluno.nome);
+  let hist = base.filter(x => normalizarNome(x.aluno && x.aluno.nome) === k);
+  const nasc = a.aluno && a.aluno.dataNasc;
+  if (nasc) hist = hist.filter(x => !x.aluno?.dataNasc || x.aluno.dataNasc === nasc);
+  const unicos = []; const vistos = new Set();
+  hist.forEach(x => { if (!vistos.has(x.id)){ vistos.add(x.id); unicos.push(x); } });
+  unicos.sort((x,y)=> new Date(x.aluno?.data || x.criadoEm || 0) - new Date(y.aluno?.data || y.criadoEm || 0));
+  if (unicos.length < 2) return "";
+  const cols = unicos.slice(-4);
+  const primeiro = cols[0], ultimo = cols[cols.length-1];
+  return `
+  <div class="block-title" style="margin-top:16px;">📈 Evolução (${unicos.length} avaliações)</div>
+  <div style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+    <tr><th style="text-align:left;padding:6px;border-bottom:2px solid var(--line);">Teste</th>${cols.map(c=>`<th style="text-align:left;padding:6px;border-bottom:2px solid var(--line);white-space:nowrap;">${formatarDataBR(c.aluno?.data)}</th>`).join("")}</tr>
+    ${linhasEvolucao().map(l => {
+      let dica = "";
+      if (l.n){ const n1 = l.n(primeiro), n2 = l.n(ultimo); if (n1 !== null && n2 !== null && n1 !== n2) dica = n2 > n1 ? ` <b style="color:var(--ok);">▲ +${(n2-n1)}</b>` : ` <b style="color:var(--restrito);">▼ ${(n2-n1)}</b>`; }
+      return `<tr><td style="padding:6px;border-bottom:1px solid var(--line);font-weight:700;color:var(--navy);">${l.nome}</td>${cols.map((c,i)=>`<td style="padding:6px;border-bottom:1px solid var(--line);">${escAttr(l.v(c))}${i===cols.length-1 ? dica : ""}</td>`).join("")}</tr>`;
+    }).join("")}
+  </table></div>`;
+}
 function abrirAluno(i){
   state.alunoSelecionado = state.alunoBuscaResultados[i];
   render();
@@ -2146,9 +2610,11 @@ function tabEstatisticas(){
 
   <div class="block-title" style="margin-top:28px;color:var(--restrito);">⚠️ Zona de Risco — Administrador</div>
   <div class="summary-mini" style="border:1.5px solid var(--restrito);">
-    <p class="hint" style="margin:0 0 12px;">Baixe um backup dos dados a qualquer momento, ou apague tudo (atendimentos, avaliações, recados e contador de IA) para começar do zero. Recomendado: sempre baixe o backup antes de resetar.</p>
+    <p class="hint" style="margin:0 0 12px;">Baixe um backup dos dados (atendimentos, avaliações, professores e recados) a qualquer momento, restaure um backup anterior, ou apague tudo (atendimentos, avaliações, recados e contador de IA) para começar do zero. Recomendado: sempre baixe o backup antes de resetar.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn btn-outline" id="btnBackupAvulso" style="width:auto;padding:9px 16px;font-size:14.5px;">⬇️ Baixar backup agora</button>
+      <button class="btn btn-outline" id="btnRestaurar" style="width:auto;padding:9px 16px;font-size:14.5px;">⬆️ Restaurar backup</button>
+      <input type="file" id="inRestaurar" accept=".json,application/json" style="display:none"/>
       <button class="btn btn-outline" id="btnResetTudo" style="width:auto;padding:9px 16px;font-size:14.5px;color:var(--restrito);border-color:var(--restrito);">🗑️ Resetar tudo</button>
     </div>
   </div>
@@ -2157,15 +2623,29 @@ function tabEstatisticas(){
 
 /* ---------- AVALIAÇÕES (ADMIN) ---------- */
 /* ---------- BACKUP E RESET (ADMIN) ---------- */
+async function lerProfessoresBrutos(){
+  if (firebaseReady && db){
+    const snap = await db.collection("professores").get();
+    return snap.docs.map(d => d.data());
+  }
+  return JSON.parse(localStorage.getItem("skyfit_professores") || "[]");
+}
+const semDoc = x => { const { __doc, ...r } = x; return r; };
 async function baixarBackup(){
   toast("Preparando backup...");
-  const atendimentos = await carregarAtendimentos();
-  const avaliacoes = await carregarAvaliacoes();
+  const atendimentos = (await carregarAtendimentos()).map(semDoc);
+  const avaliacoes = (await carregarAvaliacoes()).map(semDoc);
+  let professores = [], recados = [];
+  try{ professores = await lerProfessoresBrutos(); }catch(e){ console.error(e); }
+  try{ recados = await carregarRecados(); }catch(e){ console.error(e); }
   const pacote = {
     geradoEm: new Date().toISOString(),
+    versaoApp: APP_VERSAO,
     origem: firebaseReady ? "firebase" : "localStorage-deste-aparelho",
     atendimentos,
-    avaliacoes
+    avaliacoes,
+    professores,
+    recados
   };
   const blob = new Blob([JSON.stringify(pacote, null, 2)], {type: "application/json"});
   const url = URL.createObjectURL(blob);
@@ -2174,7 +2654,72 @@ async function baixarBackup(){
   a.download = `backup_skyfit_mapeamento_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
+  try{ localStorage.setItem("skyfit_ultimo_backup", new Date().toISOString()); }catch(e){}
   toast("Backup baixado.");
+}
+function diasDesdeBackup(){
+  try{
+    const v = localStorage.getItem("skyfit_ultimo_backup");
+    if (!v) return null;
+    return Math.floor((Date.now() - new Date(v).getTime()) / 86400000);
+  }catch(e){ return null; }
+}
+async function mapaExistentes(colecao, campo){
+  const snap = await db.collection(colecao).get();
+  const m = {};
+  snap.docs.forEach(d => { const v = d.data()[campo]; if (v) m[v] = d.id; });
+  return m;
+}
+async function restaurarBackup(pacote){
+  const atend = Array.isArray(pacote.atendimentos) ? pacote.atendimentos : [];
+  const avals = Array.isArray(pacote.avaliacoes) ? pacote.avaliacoes : [];
+  const profs = Array.isArray(pacote.professores) ? pacote.professores : [];
+  const recs = Array.isArray(pacote.recados) ? pacote.recados : [];
+  if (firebaseReady && db){
+    const exA = await mapaExistentes("atendimentos","id");
+    const exV = await mapaExistentes("avaliacoes","atendimentoId");
+    const exR = await mapaExistentes("recados","id");
+    const ops = [];
+    atend.forEach(x => { const d = semDoc(x); if (d.id) ops.push(["atendimentos", exA[d.id] || d.id, d]); });
+    avals.forEach(x => { const d = semDoc(x); if (d.atendimentoId) ops.push(["avaliacoes", exV[d.atendimentoId] || "av_" + d.atendimentoId, d]); });
+    profs.forEach(x => { if (x.id) ops.push(["professores", x.id, x]); });
+    recs.forEach(x => { const d = semDoc(x); if (d.id) ops.push(["recados", exR[d.id] || "rc_" + d.id, d]); });
+    for (let i = 0; i < ops.length; i += 400){
+      const batch = db.batch();
+      ops.slice(i, i+400).forEach(([c,id,d]) => batch.set(db.collection(c).doc(id), d));
+      await batch.commit();
+    }
+  } else {
+    const mescla = (lsKey, itens, chave) => {
+      const arr = JSON.parse(localStorage.getItem(lsKey) || "[]");
+      itens.map(semDoc).forEach(d => { const k = chave(d); if (!k) return; const i = arr.findIndex(x => chave(x) === k); if (i >= 0) arr[i] = d; else arr.push(d); });
+      localStorage.setItem(lsKey, JSON.stringify(arr));
+    };
+    mescla("skyfit_atendimentos", atend, x => x.id);
+    mescla("skyfit_avaliacoes", avals, x => x.atendimentoId);
+    mescla("skyfit_professores", profs, x => x.id);
+    mescla("skyfit_recados", recs, x => x.id);
+  }
+  invalidarCachesAdmin();
+  state.professoresLista = null;
+  return { atend: atend.length, avals: avals.length, profs: profs.length, recs: recs.length };
+}
+function escolherArquivoBackup(){
+  const inp = document.getElementById("inRestaurar");
+  if (inp) inp.click();
+}
+async function lerArquivoBackup(file){
+  if (!file) return;
+  try{
+    const pacote = JSON.parse(await file.text());
+    if (!pacote || !Array.isArray(pacote.atendimentos)){ alert("Esse arquivo não parece um backup do app."); return; }
+    const n = (pacote.atendimentos||[]).length, v = (pacote.avaliacoes||[]).length, p = (pacote.professores||[]).length, r = (pacote.recados||[]).length;
+    if (!confirm(`Restaurar este backup (${pacote.geradoEm ? new Date(pacote.geradoEm).toLocaleDateString("pt-BR") : "sem data"})?\n\n${n} atendimentos, ${v} avaliações, ${p} professores/configurações e ${r} recados.\n\nRegistros com o mesmo código serão substituídos pela versão do backup. Nada do que está no app e não está no backup é apagado.`)) return;
+    toast("Restaurando...");
+    const res = await restaurarBackup(pacote);
+    alert(`Backup restaurado: ${res.atend} atendimentos, ${res.avals} avaliações, ${res.profs} professores/configurações, ${res.recs} recados.`);
+    render();
+  }catch(e){ console.error(e); alert("Erro ao restaurar: " + (e && e.message ? e.message : "arquivo inválido")); }
 }
 
 async function resetarTudo(){
@@ -2221,9 +2766,9 @@ async function carregarAvaliacoes(){
     if (firebaseReady && db){
       const snap = await db.collection("avaliacoes").get();
       state.firestoreErro = "";
-      return snap.docs.map(d=>d.data());
+      return snap.docs.map(d=>({ ...d.data(), __doc: d.id }));
     } else {
-      return JSON.parse(localStorage.getItem("skyfit_avaliacoes") || "[]");
+      return JSON.parse(localStorage.getItem("skyfit_avaliacoes") || "[]").map((a,i)=>({ ...a, __doc: "L"+i }));
     }
   }catch(e){
     console.error(e);
@@ -2248,11 +2793,17 @@ function nomeMes(chave){
 function pontosAvaliacao(d){
   return (d.nota||0) + (d.clareza==="sim" ? 1 : 0);
 }
-function calcularRankingMes(dados, chave){
+function calcularRankingMes(dados, chave, vendas, pv){
   const por = {};
+  (vendas||[]).forEach(a => {
+    if (!pv || !a.venda || !a.venda.em || mesChave(a.venda.em) !== chave) return;
+    const p = (a.cupom && a.cupom.professor) || a.professor; if (!p) return;
+    if (!por[p]) por[p] = { professor:p, pontos:0, soma:0, total:0, vendas:0 };
+    por[p].pontos += pv; por[p].vendas = (por[p].vendas||0) + 1;
+  });
   dados.filter(d => d.criadoEm && mesChave(d.criadoEm) === chave && d.professorAtendimento).forEach(d=>{
     const p = d.professorAtendimento;
-    if (!por[p]) por[p] = { professor:p, pontos:0, soma:0, total:0 };
+    if (!por[p]) por[p] = { professor:p, pontos:0, soma:0, total:0, vendas:0 };
     por[p].pontos += pontosAvaliacao(d);
     por[p].soma += (d.nota||0);
     por[p].total += 1;
@@ -2266,6 +2817,8 @@ async function abrirAvaliacoes(){
   state.avaliacoesLoading = true;
   render();
   const dados = await carregarAvaliacoes();
+  let vendasFechadas = [];
+  if (state.role === "admin"){ try{ vendasFechadas = (await carregarAtendimentos()).filter(fechouVenda); }catch(e){ console.error(e); } }
   const total = dados.length;
   const media = total ? (dados.reduce((s,d)=>s+(d.nota||0),0)/total).toFixed(1) : "-";
   const claros = total ? Math.round(dados.filter(d=>d.clareza==="sim").length/total*100) : 0;
@@ -2287,7 +2840,7 @@ async function abrirAvaliacoes(){
     .map(([prof,v])=>({professor:prof, media:(v.soma/v.count).toFixed(1), total:v.count}))
     .sort((a,b)=>b.media-a.media);
 
-  state.avaliacoesData = { dados: [...dados].sort((a,b)=>new Date(b.criadoEm||0)-new Date(a.criadoEm||0)), total, media, claros, mediaMotivacao, rankingProfessores, mediaRecepcao, bemRecebidos, totalComRecepcao: comRecepcao.length };
+  state.avaliacoesData = { vendasFechadas, dados: [...dados].sort((a,b)=>new Date(b.criadoEm||0)-new Date(a.criadoEm||0)), total, media, claros, mediaMotivacao, rankingProfessores, mediaRecepcao, bemRecebidos, totalComRecepcao: comRecepcao.length };
   state.avaliacoesLoading = false;
   state.avaliacoesNovidades = 0;
   marcarComoVisto("avaliacoes");
@@ -2358,7 +2911,8 @@ function tabAvaliacoes(){
     const mesAtual = mesChave(new Date().toISOString());
     const mesSel = state.rankingMes || mesAtual;
     const meses = [...new Set([mesAtual, ...aFull.dados.filter(d=>d.criadoEm).map(d=>mesChave(d.criadoEm))])].sort().reverse();
-    const ranking = calcularRankingMes(aFull.dados, mesSel);
+    const pvRank = parseFloat((state.cupomConfig||{}).pontosVenda) || 0;
+    const ranking = calcularRankingMes(aFull.dados, mesSel, aFull.vendasFechadas, pvRank);
     const topo = ranking.length ? ranking[0].pontos : 0;
     return `
   <div class="block-title">🏆 Ranking de Professores</div>
@@ -2368,12 +2922,12 @@ function tabAvaliacoes(){
       ${meses.map(m=>`<option value="${m}" ${m===mesSel?"selected":""}>${nomeMes(m)}</option>`).join("")}
     </select>
   </div>
-  <p class="hint" style="margin:0 0 12px;">Pontuação: cada avaliação vale a nota (1 a 5) + 1 ponto se o aluno disse que o professor foi claro (máx. 6 por avaliação).</p>
+  <p class="hint" style="margin:0 0 12px;">Pontuação: cada avaliação vale a nota (1 a 5) + 1 ponto se o aluno disse que o professor foi claro (máx. 6 por avaliação).${pvRank ? ` Cada venda fechada com cupom vale +${pvRank} ponto${pvRank>1?'s':''}.` : ''}</p>
   ${ranking.length===0 ? `<p class="hint">Nenhuma avaliação em ${nomeMes(mesSel)} ainda.</p>` : `
   <div class="summary-mini" style="border:1.5px solid var(--gold);margin-bottom:14px;text-align:center;">
     <div style="font-size:13px;color:var(--muted);">Professor destaque de ${nomeMes(mesSel)}${mesSel===mesAtual?" (até agora)":""}</div>
     <div style="font-size:22px;font-weight:800;color:var(--navy);margin-top:4px;">🏆 ${ranking[0].professor}</div>
-    <div style="font-size:14.5px;color:var(--muted);">${ranking[0].pontos} pontos • ${ranking[0].media.toFixed(1)} ★ • ${ranking[0].total} avaliações</div>
+    <div style="font-size:14.5px;color:var(--muted);">${ranking[0].pontos} pontos • ${ranking[0].media.toFixed(1)} ★ • ${ranking[0].total} avaliações${ranking[0].vendas ? " • " + ranking[0].vendas + " vendas" : ""}</div>
   </div>
   ${ranking.map((r,i)=>`
     <div style="margin-bottom:12px;">
@@ -2381,7 +2935,7 @@ function tabAvaliacoes(){
         <span style="font-weight:700;color:var(--navy);">${i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1)+"º"} ${r.professor}</span>
         <span style="font-weight:800;color:var(--navy);">${r.pontos} pts</span>
       </div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:4px;">${r.media.toFixed(1)} ★ de média • ${r.total} avaliações</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:4px;">${r.media.toFixed(1)} ★ de média • ${r.total} avaliações${r.vendas ? " • " + r.vendas + " vendas" : ""}</div>
       <div style="background:#e9eef6;border-radius:6px;height:10px;overflow:hidden;">
         <div style="width:${topo?Math.round(r.pontos/topo*100):0}%;height:100%;background:linear-gradient(90deg,var(--gold),var(--red-dark));"></div>
       </div>
@@ -2390,16 +2944,23 @@ function tabAvaliacoes(){
   })() : ""}
 
   <div class="block-title">${isAdmin ? "Respostas Individuais" : "Minhas Respostas Individuais"}</div>
-  ${a.dados.length===0 ? `<p class="hint">Nenhuma avaliação recebida ainda.</p>` : a.dados.map(d=>`
+  ${isAdmin ? `<button class="btn btn-outline" onclick="removerAvaliacoesDuplicadas()" style="width:auto;padding:8px 14px;margin-bottom:10px;font-size:14.5px;">🧹 Remover avaliações repetidas do mesmo atendimento</button>` : ""}
+  ${a.dados.length===0 ? `<p class="hint">Nenhuma avaliação recebida ainda.</p>` : (()=>{
+    const contAv = {};
+    aFull.dados.forEach(x => { if (x.atendimentoId) contAv[x.atendimentoId] = (contAv[x.atendimentoId]||0) + 1; });
+    return a.dados.map(d=>`
     <div class="exercise-card" style="align-items:flex-start;">
-      <div>
+      <div style="flex:1;">
         <div class="ex-name">${"★".repeat(d.nota||0)}${"☆".repeat(5-(d.nota||0))}${isAdmin ? " — Professor: " + (d.professorAtendimento||"-") : ""}</div>
         <div class="ex-meta">Claro: ${d.clareza==="sim"?"Sim":"Não"} • Motivação: ${d.motivacao !== undefined && d.motivacao !== null ? d.motivacao+"/10" : "-"} • ${d.criadoEm ? new Date(d.criadoEm).toLocaleDateString('pt-BR') : ""}</div>
         ${d.notaRecepcao ? `<div class="ex-meta">Recepção: ${"★".repeat(d.notaRecepcao)} • Bem recebido: ${d.recepcao==="sim"?"Sim":"Não"}</div>` : ""}
         ${d.comentario ? `<div class="ex-meta" style="margin-top:4px;font-style:italic;">"${d.comentario}"</div>` : ""}
+        ${isAdmin && d.atendimentoId && contAv[d.atendimentoId] > 1 ? `<div class="ex-meta" style="color:var(--restrito);">⚠️ ${contAv[d.atendimentoId]} avaliações do mesmo atendimento</div>` : ""}
       </div>
+      ${isAdmin && d.__doc ? `<button onclick="excluirAvaliacaoAdmin('${d.__doc}')" title="Excluir" style="border:none;background:none;color:var(--restrito);font-size:18px;cursor:pointer;padding:2px 8px;">🗑️</button>` : ""}
     </div>
-  `).join("")}
+  `).join("");
+  })()}
 
   <button class="btn btn-outline" id="btnRecarregarAval" style="margin-top:14px;width:100%;">↻ Atualizar</button>
   `;
@@ -2684,6 +3245,19 @@ function tabTutorial(){
 
   <div class="exercise-card" style="align-items:flex-start;">
     <div style="flex:1;">
+      <div class="ex-name">⭐ Recursos extras</div>
+      <div class="ex-meta" style="margin-top:4px;font-size:15px;color:var(--ink);">
+        <b>Cupom:</b> no Fechamento, deixe "Oferecer desconto" em Sim — o aluno escolhe o plano na tela de obrigado da avaliação.<br>
+        <b>Enviar depois:</b> no Fechamento, digite o WhatsApp do aluno e toque em "Salvar contato"; depois, no tablet da academia, abra Mais → Envios e mande pelo WhatsApp da academia.<br>
+        <b>Reavaliação:</b> em Alunos, abra o aluno e toque em "Reavaliar este aluno". A aba mostra a evolução entre as avaliações. O botão "Quem precisa de reavaliação" lista quem está há 30+ dias sem retornar.<br>
+        <b>Fotos:</b> no Mapeamento, adicione até 2 fotos do agachamento.<br>
+        <b>Atalho no tablet:</b> no menu do navegador, escolha "Adicionar à tela inicial".
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise-card" style="align-items:flex-start;">
+    <div style="flex:1;">
       <div class="ex-name">1. Protocolos</div>
       <div class="ex-meta" style="margin-top:4px;font-size:15px;color:var(--ink);">
         Antes de avaliar, use essa aba como consulta rápida — mostra o passo a passo certo de cada teste (Tornozelo, Thomas, Bird-Dog, Stork, Prancha, Isquiotibiais, Flexão, Curl-up e Overhead Squat com Bastão), com imagem e critérios de referência. Vale abrir antes do atendimento ou consultar no meio do teste, na frente do aluno.
@@ -2896,16 +3470,21 @@ function garantirCupom(){
   };
   return true;
 }
-async function novoAtendimento(){
-  if (!confirm("Iniciar um novo atendimento? O atual já foi salvo no histórico (confira o status na aba Fechamento).")) return;
-  if (state.aluno && state.aluno.nome && state.aluno.nome.trim()) await salvarAtendimento(true);
+function resetarFluxo(){
   const base = JSON.parse(FLUXO_INICIAL);
   Object.assign(state, base, {
     atendimentoId:null, atendimentoDono:null, atendimentoCupom:null, cupomForm:null, ofereceDesconto:true, criadoEmOriginal:null,
-    whatsapp:"", saveStatus:null, saveError:"", pdfStatus:null, pdfProfStatus:null, wppStatus:null, treinoLoading:false
+    whatsapp:"", envio:null, contatoAutorizado:false, fotos:[], reavaliacaoDe:null,
+    saveStatus:null, saveError:"", pdfStatus:null, pdfProfStatus:null, wppStatus:null, treinoLoading:false
   });
   state.aluno.data = new Date().toISOString().slice(0,10);
   state.activeTab = 0;
+}
+async function novoAtendimento(){
+  if (!confirm("Iniciar um novo atendimento? O atual já foi salvo no histórico (confira o status na aba Fechamento).")) return;
+  if (state.aluno && state.aluno.nome && state.aluno.nome.trim()) await salvarAtendimento(true);
+  limparRascunho();
+  resetarFluxo();
   toast("Novo atendimento iniciado.");
   render();
   requestAnimationFrame(()=> window.scrollTo(0,0));
@@ -2933,6 +3512,7 @@ async function carregarProfessores(){
       recepcao: cfg.recepcao || "5519971685416",
       campanhaAtiva: cfg.campanhaAtiva !== false,
       validadeDias: parseInt(cfg.validadeDias,10) || 7,
+      pontosVenda: parseFloat(cfg.pontosVenda) || 0,
       planos: Array.isArray(cfg.planos) && cfg.planos.length ? cfg.planos : planosPadrao()
     };
     state.professoresLista = docs.filter(d => d.id && d.id !== "_config" && d.nome)
@@ -3010,6 +3590,8 @@ function lerCamposCampanha(){
   const c = state.cupomConfig;
   const v = parseInt(document.getElementById("inValidade")?.value,10);
   const rc = document.getElementById("inRecepcao")?.value;
+  const pv = parseFloat(document.getElementById("inPontosVenda")?.value);
+  if (!isNaN(pv)) c.pontosVenda = pv;
   if (v) c.validadeDias = v;
   if (rc) c.recepcao = rc;
 }
@@ -3045,7 +3627,8 @@ async function salvarCupomConfig(){
     ativo: p.ativo !== false
   }));
   if (planos.some(p => !p.nome || !(p.pct > 0 && p.pct <= 100))){ toast("Cada plano precisa de nome e desconto entre 1 e 100%."); return; }
-  const novo = { recepcao: n, campanhaAtiva: state.cupomConfig.campanhaAtiva !== false, validadeDias, planos };
+  const pontosVenda = Math.max(0, parseFloat(document.getElementById("inPontosVenda")?.value) || 0);
+  const novo = { recepcao: n, campanhaAtiva: state.cupomConfig.campanhaAtiva !== false, validadeDias, pontosVenda, planos };
   if (novo.campanhaAtiva && !planos.some(p => p.ativo)) toast("Atenção: nenhum plano está ativo, então não será gerado cupom.");
   try{
     await gravarDocProfessores({ id:"_config", ...novo });
@@ -3132,6 +3715,7 @@ function tabProfessores(){
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <div class="field" style="flex:1;min-width:140px;"><label>Validade do cupom (dias para o aluno fechar)</label><input id="inValidade" type="number" min="1" value="${escAttr(cfg.validadeDias)}"/></div>
+      <div class="field" style="flex:1;min-width:140px;"><label>Pontos por venda no ranking (0 = não conta)</label><input id="inPontosVenda" type="number" min="0" step="1" value="${escAttr(cfg.pontosVenda||0)}"/></div>
     </div>
     <div class="field"><label>WhatsApp da recepção (com DDD) — recebe a mensagem do aluno ao usar o cupom</label>
       <input id="inRecepcao" type="text" value="${escAttr(cfg.recepcao)}" placeholder="5519971685416"/></div>
@@ -3236,6 +3820,14 @@ function tabVendas(){
       <span style="color:var(--muted);">${r.fechados} de ${r.oferecidos} fecharam (${r.oferecidos ? Math.round(r.fechados/r.oferecidos*100) : 0}%)</span>
     </div>`).join("")}
 
+  ${(()=>{
+    const planos = {};
+    doMes.filter(fechouVenda).forEach(a => { const p = (a.venda.plano || "").trim() || "Não informado"; planos[p] = (planos[p]||0) + 1; });
+    const lista = Object.entries(planos).sort((x,y)=> y[1]-x[1]);
+    return lista.length ? `<div class="block-title" style="margin-top:20px;">Fechamentos por plano</div>` + lista.map(([p,n]) => `
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:15px;"><span style="font-weight:700;color:var(--navy);">${escAttr(p)}</span><span style="color:var(--muted);">${n} ${n===1?"venda":"vendas"}</span></div>`).join("") : "";
+  })()}
+
   <div class="block-title" style="margin-top:20px;">Cupons do mês</div>
   ${doMes.length === 0 ? `<p class="hint">Nada por aqui ainda.</p>` : doMes.map(a => {
     const fechou = fechouVenda(a);
@@ -3264,6 +3856,7 @@ function irParaTab(i){
   if (nome === "Recados") state.recadosData = null;
   if (nome === "Hoje") state.hojeData = null;
   if (nome === "Vendas") state.vendasData = null;
+  if (nome === "Envios") state.enviosData = null;
   if (nome === "Professores") state.professoresLista = null;
   if (nome === "Estatísticas") state.statsData = null;
   if (nome === "Avaliações") state.avaliacoesData = null;
@@ -3354,12 +3947,24 @@ function attachAppEvents(){
   if (alConsentimento) alConsentimento.onchange = ()=> state.anamnese.consentimentoParq = alConsentimento.checked;
 
   // Tab 1
-  document.querySelectorAll(".status-btn:not([data-parq]):not([data-sexo]):not([data-freq]):not([data-tipotreino])").forEach(btn=>{
+  document.querySelectorAll(".status-btn:not([data-parq]):not([data-sexo]):not([data-freq]):not([data-tipotreino]):not([data-thomascomp])").forEach(btn=>{
     btn.onclick = ()=>{
       const key = btn.dataset.test, status = btn.dataset.status;
       if (!key) return; // botão de outra seção, já tem handler próprio
       state.testes[key].status = (state.testes[key].status===status) ? "" : status;
       render();
+    };
+  });
+  ["dir","esq"].forEach(k=>{
+    const el = document.getElementById("thomas_"+k);
+    if (el) el.onchange = ()=>{ state.testes.thomas[k] = el.value; recalcularThomas(); render(); };
+  });
+  document.querySelectorAll("[data-thomascomp]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const [k, v] = btn.dataset.thomascomp.split(":");
+      const campo = k + "Comp";
+      state.testes.thomas[campo] = state.testes.thomas[campo] === v ? "" : v;
+      recalcularThomas(); render();
     };
   });
   ["tornozelo","thomas","birddog","stork","prancha"].forEach(k=>{
@@ -3389,6 +3994,18 @@ function attachAppEvents(){
     const el = document.getElementById("sq_"+k);
     if (el) el.onchange = ()=> state.squat[k] = el.value;
   });
+  const inFotoSquat = document.getElementById("inFotoSquat");
+  if (inFotoSquat) inFotoSquat.onchange = async ()=>{
+    const file = inFotoSquat.files && inFotoSquat.files[0];
+    if (!file) return;
+    try{
+      state.fotoErro = "";
+      const dataUrl = await comprimirImagem(file, 900, 0.6);
+      state.fotos = [...(state.fotos||[]), dataUrl].slice(0,2);
+      if (state.aluno && state.aluno.nome && state.aluno.nome.trim()) salvarAtendimento(true);
+    }catch(e){ console.error(e); state.fotoErro = "Não consegui carregar essa foto. Tente outra."; }
+    render();
+  };
   const obsSquat = document.getElementById("obs_squat");
   if (obsSquat) obsSquat.oninput = ()=> state.squat.obs = obsSquat.value;
 
@@ -3454,9 +4071,22 @@ function attachAppEvents(){
   const inWpp = document.getElementById("inWpp");
   if (inWpp) inWpp.oninput = ()=> state.whatsapp = inWpp.value;
   const btnWpp = document.getElementById("btnWpp");
+  const chkAut = document.getElementById("chkAutorizou");
+  if (chkAut) chkAut.onchange = ()=> state.contatoAutorizado = chkAut.checked;
+  const btnSalvarContato = document.getElementById("btnSalvarContato");
+  if (btnSalvarContato) btnSalvarContato.onclick = async ()=>{
+    const num = (state.whatsapp||"").replace(/\D/g,"");
+    if (num.length < 10){ toast("Digite o WhatsApp do aluno com DDD."); return; }
+    if (!state.aluno.nome || !state.aluno.nome.trim()){ toast("Preencha o nome do aluno antes."); return; }
+    garantirCupom();
+    await salvarAtendimento(true);
+    if (state.saveStatus === "ok"){ toast("Contato salvo. Envie depois pela aba Envios, no tablet da academia."); state.enviosData = null; }
+    else toast("Não consegui salvar: " + (state.saveError || "erro desconhecido"));
+    render();
+  };
   if (btnWpp) btnWpp.onclick = async ()=>{
     const num = (state.whatsapp||"").replace(/\D/g,"");
-    if (!num){ toast("Digite o WhatsApp."); return; }
+    if (num.length < 10){ toast("Digite o WhatsApp com DDD."); return; }
     if (garantirCupom()) state.saveStatus = null;
     if (campanhaAtiva() && state.ofereceDesconto !== false && !cupomParaAtendimento() && !confirm("Você ainda não gerou o cupom de desconto deste aluno. Enviar assim mesmo (sem cupom)?")) return;
     if (state.saveStatus !== "ok"){
@@ -3465,19 +4095,13 @@ function attachAppEvents(){
     if (state.saveStatus !== "ok"){
       toast("Não foi possível salvar o atendimento — o link do PDF pode não funcionar. Verifique o erro na aba Fechamento antes de enviar.");
     }
-    const id = getAtendimentoId();
-    const baseUrl = window.location.href.split("?")[0];
-    const linkAvaliacao = `${baseUrl}?avaliar=${id}`;
-    const linkPdf = `${baseUrl}?pdf=${id}`;
     garantirCupom();
-    const cupW = cupomParaAtendimento();
-    const planosTxt = cupW && cupW.planos ? "\n" + cupW.planos.map(p => `• ${descPlano(p)}`).join("\n") : "";
-    const cupomTxt = cupW ? `\n\n🎟️ Presente do professor ${cupW.professor}: cupom *${cupW.codigo}* na sua matrícula${planosTxt}\nVálido até ${dataBR(cupW.validoAte)}. Toque para garantir:\n${linkCupom(cupW)}` : "";
-    const primeiro = (state.aluno.nome||"").trim().split(/\s+/)[0] || "";
-    const texto = encodeURIComponent(
-      `*Skyfit Park Palmeiras* 💪\nOlá${primeiro ? ", " + primeiro : ""}! Seu mapeamento biomecânico com o professor ${donoAtendimento()} está pronto:\n📄 ${linkPdf}${cupomTxt}\n\n⭐ Avalie seu atendimento em 1 minuto:\n${linkAvaliacao}`
-    );
-    window.open(`https://wa.me/55${num}?text=${texto}`, "_blank");
+    const texto = mensagemWhatsApp({ id:getAtendimentoId(), nome:state.aluno.nome, professor:donoAtendimento(), cupom:cupomParaAtendimento() });
+    window.open(`https://wa.me/${numeroWpp(num)}?text=${encodeURIComponent(texto)}`, "_blank");
+    state.envio = { status:"enviado", em:new Date().toISOString(), por:state.professor };
+    state.enviosData = null;
+    await salvarAtendimento(true);
+    render();
   };
 
   // Tab 6 - Estatísticas
@@ -3485,7 +4109,14 @@ function attachAppEvents(){
   if (btnRecarregarStats) btnRecarregarStats.onclick = ()=>{ state.statsData = null; abrirEstatisticas(); };
 
   const btnBackupAvulso = document.getElementById("btnBackupAvulso");
-  if (btnBackupAvulso) btnBackupAvulso.onclick = ()=> baixarBackup();
+  if (btnBackupAvulso) btnBackupAvulso.onclick = async ()=>{ await baixarBackup(); render(); };
+  const btnRestaurar = document.getElementById("btnRestaurar"), inRestaurar = document.getElementById("inRestaurar");
+  if (btnRestaurar && inRestaurar){
+    btnRestaurar.onclick = ()=> inRestaurar.click();
+    inRestaurar.onchange = ()=>{ const fl = inRestaurar.files && inRestaurar.files[0]; inRestaurar.value = ""; lerArquivoBackup(fl); };
+  }
+  const avisoBk = document.getElementById("avisoBackup");
+  if (avisoBk) avisoBk.onclick = async ()=>{ await baixarBackup(); render(); };
 
   const btnResetTudo = document.getElementById("btnResetTudo");
   if (btnResetTudo) btnResetTudo.onclick = ()=> resetarTudo();
@@ -3805,6 +4436,8 @@ async function renderAvaliacaoPublica(id){
   });
 
   document.getElementById("btnEnviarAvaliacao").onclick = async ()=>{
+    const btnEnv = document.getElementById("btnEnviarAvaliacao");
+    if (btnEnv.disabled) return;
     const err = document.getElementById("avErr");
     if (!respostas.nota){ err.textContent = "Dê uma nota antes de enviar."; return; }
     if (!respostas.clareza){ err.textContent = "Responda se o professor explicou tudo com clareza."; return; }
@@ -3821,9 +4454,11 @@ async function renderAvaliacaoPublica(id){
       professorAtendimento: info.professor,
       criadoEm: new Date().toISOString()
     };
+    btnEnv.disabled = true;
     try{
+      if (await avaliacaoJaExiste(id)){ mostrarObrigado(info, true); return; }
       if (firebaseReady && db){
-        await db.collection("avaliacoes").add(registro);
+        await db.collection("avaliacoes").doc("av_" + id).set(registro);
       } else {
         const arr = JSON.parse(localStorage.getItem("skyfit_avaliacoes") || "[]");
         arr.push(registro);
@@ -3834,6 +4469,7 @@ async function renderAvaliacaoPublica(id){
       mostrarObrigado(info, false);
     }catch(e){
       console.error(e);
+      btnEnv.disabled = false;
       err.textContent = "Erro ao enviar: " + (e && e.message ? e.message : "falha desconhecida") + ". Tire um print desta tela e mande pro professor.";
     }
   };
@@ -3848,6 +4484,7 @@ if (avaliarId){
   renderPdfPublico(pdfId);
 } else {
   const sessaoRestaurada = restaurarSessao();
+  if (sessaoRestaurada) restaurarRascunho();
   render();
   if (sessaoRestaurada) { atualizarContadoresNovidade(); carregarApiKeyDaNuvem(); carregarProfessores().then(validarSessaoContraLista); }
 }
