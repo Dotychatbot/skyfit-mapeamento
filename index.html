@@ -314,7 +314,7 @@ const LOGO_SKYFIT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAA
    ========================================================= */
 
 /* ---------- CONFIG ---------- */
-const APP_VERSAO = "2026-08-29.4"; // atualizar a cada mudança publicada, ajuda a confirmar se o link está com a versão mais nova
+const APP_VERSAO = "2026-10-13.8"; // atualizar a cada mudança publicada, ajuda a confirmar se o link está com a versão mais nova
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA9DT4_HMSnFZB3gpFrF35vRr36Aiu0osw",
   authDomain: "skyfit-mapeamento.firebaseapp.com",
@@ -448,7 +448,7 @@ const state = {
   activeTab: 0,
   atendimentoId: null,
   aluno: {nome:"", sexo:"", dataNasc:"", data: new Date().toISOString().slice(0,10), primeiroAtendimento: false},
-  anamnese: {historico:"", limitacoes:"", cirurgias:"", restricoes:"", objetivo:"", parq:{q1:"",q2:"",q3:"",q4:"",q5:"",q6:"",q7:""}, parqDetalhes:"", consentimentoParq:false},
+  anamnese: {historico:"", limitacoes:"", cirurgias:"", restricoes:"", objetivo:"", freqSemana:"", tipoTreino:"", tipoTreinoOutro:"", parq:{q1:"",q2:"",q3:"",q4:"",q5:"",q6:"",q7:""}, parqDetalhes:"", consentimentoParq:false},
   testes: {
     tornozelo:{status:"", obs:""},
     thomas:{status:"", obs:""},
@@ -488,11 +488,22 @@ const state = {
   hojeData:null,
   hojeLoading:false,
   menuMaisAberto:false,
-  nuvemOk:firebaseReady
+  nuvemOk:firebaseReady,
+  atendimentoDono:null,
+  atendimentoCupom:null,
+  professoresLista:null,
+  professoresErro:"",
+  cupomConfig:{ recepcao:"5519971685416", campanhaAtiva:true, validadeDias:7, planos:planosPadrao() },
+  ofereceDesconto:true,
+  cupomForm:null,
+  loginSemLista:false,
+  vendasData:null,
+  vendasLoading:false,
+  vendasMes:null
 };
 
 const TABS_BASE = ["Protocolos","Anamnese","Mapeamento","Deficiências","Treino (IA)","Fechamento","Alunos","Recados","Tutorial","Hoje"];
-const TABS_ADMIN = ["Alunos","Recados","Hoje","Estatísticas","Avaliações"];
+const TABS_ADMIN = ["Alunos","Recados","Hoje","Vendas","Professores","Estatísticas","Avaliações"];
 function currentTabs(){
   return state.role === "admin" ? TABS_ADMIN : TABS_BASE;
 }
@@ -548,7 +559,8 @@ function renderLogin(){
       <p class="sub">Skyfit Park Palmeiras</p>
       <div class="field">
         <label>Nome do avaliador (professor)</label>
-        <input id="inNome" type="text" placeholder="Seu nome completo" autocomplete="off"/>
+        <select id="inNomeSel"><option value="">Carregando lista...</option></select>
+        <input id="inNome" type="text" placeholder="Seu nome completo" autocomplete="off" style="display:none;margin-top:8px;"/>
       </div>
       <div class="field">
         <label>Senha de acesso</label>
@@ -588,6 +600,7 @@ function encerrarSessao(){
 }
 
 function attachLogin(){
+  popularSelectLogin();
   const btnMostrarSenha = document.getElementById("btnMostrarSenha");
   if (btnMostrarSenha){
     btnMostrarSenha.onclick = ()=>{
@@ -598,10 +611,13 @@ function attachLogin(){
     };
   }
   document.getElementById("btnLogin").onclick = ()=>{
-    const nome = document.getElementById("inNome").value.trim();
+    const selEl = document.getElementById("inNomeSel");
+    const selVal = selEl ? selEl.value : "";
+    const inpNome = document.getElementById("inNome").value.trim();
+    const nome = state.loginSemLista ? inpNome : (selVal === "__admin__" ? (inpNome || "Administrador") : selVal);
     const senha = document.getElementById("inSenha").value;
     const err = document.getElementById("loginErr");
-    if (!nome){ err.textContent = "Digite seu nome."; return; }
+    if (!nome){ err.textContent = state.loginSemLista ? "Digite seu nome." : "Selecione seu nome na lista."; return; }
     if (senha === SENHA_ADMIN){
       state.professor = nome;
       state.role = "admin";
@@ -611,9 +627,11 @@ function attachLogin(){
       render();
       atualizarContadoresNovidade();
       carregarApiKeyDaNuvem();
+      carregarProfessores();
       return;
     }
     if (senha !== SENHA_PADRAO){ err.textContent = "Senha incorreta."; return; }
+    if (selVal === "__admin__"){ err.textContent = "Para entrar na Administração use a senha de administrador."; return; }
     state.professor = nome;
     state.role = "professor";
     state.screen = "app";
@@ -621,6 +639,7 @@ function attachLogin(){
     render();
     atualizarContadoresNovidade();
     carregarApiKeyDaNuvem();
+    carregarProfessores();
   };
 }
 
@@ -639,7 +658,7 @@ function renderApp(){
       ${state.role === "admin" ? `
       <div class="tabs">
         ${(()=>{
-          const icones = { "Alunos":"👥", "Recados":"💬", "Hoje":"📅", "Estatísticas":"📊", "Avaliações":"⭐" };
+          const icones = { "Alunos":"👥", "Recados":"💬", "Hoje":"📅", "Vendas":"🎟️", "Professores":"🧑‍🏫", "Estatísticas":"📊", "Avaliações":"⭐" };
           return TABS_ADMIN.map((t,i)=>{
             const badgeCount = t === "Recados" ? state.recadosNovidades : (t === "Avaliações" ? state.avaliacoesNovidades : 0);
             const badge = badgeCount > 0 ? `<span class="badge-novidade">${badgeCount > 9 ? "9+" : badgeCount}</span>` : "";
@@ -686,6 +705,8 @@ function renderTab(i){
     case "Recados": return tabRecados();
     case "Tutorial": return tabTutorial();
     case "Hoje": return tabHoje();
+    case "Vendas": return tabVendas();
+    case "Professores": return tabProfessores();
     case "Estatísticas": return tabEstatisticas();
     case "Avaliações": return tabAvaliacoes();
     default: return tabAlunos();
@@ -910,6 +931,16 @@ function tabAnamnese(){
   <div class="field"><label>Cirurgias / lesões</label><textarea id="anCir" rows="2">${an.cirurgias}</textarea></div>
   <div class="field"><label>Restrições médicas</label><textarea id="anRes" rows="2">${an.restricoes}</textarea></div>
   <div class="field"><label>Objetivo principal</label><textarea id="anObj" rows="2">${an.objetivo}</textarea></div>
+  <div class="field"><label>Quantas vezes por semana o aluno vai treinar?</label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      ${[1,2,3,4,5,6].map(n=>`<button type="button" class="status-btn ok ${String(an.freqSemana)===String(n)?'selected':''}" data-freq="${n}" style="min-width:48px;flex:none;">${n}x</button>`).join("")}
+    </div></div>
+  <div class="field"><label>Treino sugerido</label>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      ${Object.keys(TIPOS_TREINO).map(k=>`<button type="button" class="status-btn ok ${an.tipoTreino===k?'selected':''}" data-tipotreino="${k}" style="flex:none;padding:0 14px;">${TIPOS_TREINO[k]}</button>`).join("")}
+    </div>
+    ${an.tipoTreino==="outro" ? `<input id="anTipoOutro" type="text" value="${escAttr(an.tipoTreinoOutro||"")}" placeholder="Descreva o treino sugerido (ex.: foco em pernas, treino para corrida)" style="margin-top:8px;width:100%;"/>` : ""}
+  </div>
 
   <div class="block-title" style="margin-top:18px;">PAR-Q — Questionário de Prontidão para Atividade Física</div>
   <p class="hint" style="margin-bottom:12px;">Perguntas padrão de triagem antes de iniciar a atividade física.</p>
@@ -1104,7 +1135,7 @@ function tabDeficiencias(){
 /* ===== TAB 3: TREINO IA ===== */
 let API_KEY_CACHE = null;
 function getApiKey(){
-  if (API_KEY_CACHE !== null) return API_KEY_CACHE;
+  if (API_KEY_CACHE) return API_KEY_CACHE;
   return localStorage.getItem("skyfit_anthropic_key") || "";
 }
 async function carregarApiKeyDaNuvem(){
@@ -1125,16 +1156,18 @@ async function carregarApiKeyDaNuvem(){
 }
 async function setApiKey(key){
   API_KEY_CACHE = key;
+  try{ key ? localStorage.setItem("skyfit_anthropic_key", key) : localStorage.removeItem("skyfit_anthropic_key"); }catch(e){}
   if (firebaseReady && db){
     try{
       await db.collection("config").doc("apiKey").set({ chave: key });
+      return true;
     }catch(e){
       console.error(e);
-      toast("Erro ao salvar na nuvem: " + (e && e.message ? e.message : "falha desconhecida"));
+      state.apiKeyErroNuvem = e && e.message ? e.message : "falha desconhecida";
+      return false;
     }
-  } else {
-    localStorage.setItem("skyfit_anthropic_key", key);
   }
+  return true;
 }
 
 async function gerarTreinoIA(){
@@ -1164,6 +1197,8 @@ Nome: ${state.aluno.nome || "não informado"}
 Sexo: ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'não informado'}
 Idade: ${idade !== null ? idade + " anos" : "não informada"}
 Objetivo principal: ${state.anamnese.objetivo || "não informado"}
+Frequência semanal de treino: ${textoFreqTipo(state.anamnese).freq || "não informada"}
+Tipo de treino desejado/sugerido: ${textoFreqTipo(state.anamnese).tipo || "não informado (use um treino tradicional adequado)"}
 Histórico de atividade física: ${state.anamnese.historico || "não informado"}
 Cirurgias/lesões: ${state.anamnese.cirurgias || "nenhuma relatada"}
 Limitações/dores: ${state.anamnese.limitacoes || "nenhuma relatada"}
@@ -1180,6 +1215,8 @@ Capacidade física medida:
 Observações do professor: ${state.deficienciaObsExtra || "nenhuma"}
 
 Monte um TREINO DE MUSCULAÇÃO COMPLETO e pronto para aplicar, priorizando a correção das deficiências acima sem perder de vista o objetivo do aluno. Leve em conta o histórico de atividade física, cirurgias/lesões relatadas e as restrições médicas ao definir exercícios, cargas e contraindicações — evite ou adapte movimentos que possam agravar uma lesão/cirurgia relatada. Use a idade e a capacidade física medida para calibrar volume e carga inicial (ex: menos repetições/séries de força para quem teve baixa capacidade nos testes ou idade mais avançada). Se houver respostas positivas no PAR-Q, ajuste a prescrição com mais cautela nessa área e sinalize a recomendação de liberação médica antes de iniciar. Estruture em blocos (ex: Aquecimento/Mobilidade, Bloco Principal, Correção/Ativação, Finalização). Para cada exercício informe: nome, séries, repetições (ou tempo), e uma observação técnica curta quando relevante. Seja direto e objetivo — sem citações de artigos, estudos ou periódicos no texto.
+
+Estrutura semanal: respeite a frequência semanal e o tipo de treino informados. Tipo "tradicional (ABCD)": crie um bloco principal por dia de treino (Treino A, B, C, D... conforme a frequência), mantendo aquecimento e finalização. Tipo "corpo inteiro": monte treinos full body que se repetem ou alternam (A/B) ao longo dos dias da semana. Tipo "outro": siga exatamente a descrição escrita pelo professor, sempre respeitando as deficiências. Se não houver informação, use um treino tradicional adequado ao nível do aluno. Pode usar quantos blocos forem necessários no JSON, nomeando cada um com clareza.
 
 Depois de montar o treino, responda com um bloco de texto contendo SOMENTE JSON válido (sem markdown, sem texto antes ou depois), no formato:
 {
@@ -1202,28 +1239,39 @@ Depois de montar o treino, responda com um bloco de texto contendo SOMENTE JSON 
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model:"claude-sonnet-4-6",
-        max_tokens:4000,
+        model:"claude-sonnet-5-5",
+        max_tokens:8000,
         messages:[{role:"user", content: prompt}]
       })
     });
-    const data = await response.json();
-    if (data.error){
-      console.error(data.error);
-      state.treino = {erro:true, mensagem: data.error.message || "Erro na chamada da IA."};
+    let data = null;
+    try{ data = await response.json(); }catch(_){}
+    if (!response.ok || !data || data.error){
+      console.error(response.status, data);
+      const det = (data && data.error && data.error.message) ? data.error.message : "sem detalhe";
+      const dica = response.status===401 ? "Chave de IA inválida ou revogada — o admin precisa salvar uma chave nova." :
+                   response.status===404 ? "Modelo de IA não encontrado." :
+                   response.status===429 ? "Limite de uso da chave atingido." :
+                   response.status===400 && /credit/i.test(det) ? "Sem créditos na conta da Anthropic." : "Erro na chamada da IA.";
+      state.treino = {erro:true, mensagem: `${dica} (código ${response.status}: ${det})`};
     } else {
       let text = (data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("");
       text = text.replace(/```json|```/g,"").trim();
       // fallback: se ainda vier algo antes/depois do JSON, extrai só o objeto {...}
       const match = text.match(/\{[\s\S]*\}/);
       if (match) text = match[0];
-      const parsed = JSON.parse(text);
-      state.treino = parsed;
-      registrarUsoIA();
+      let parsed = null;
+      try{ parsed = JSON.parse(text); }catch(_){}
+      if (!parsed){
+        state.treino = {erro:true, mensagem:"A resposta da IA veio incompleta ou fora do formato."};
+      } else {
+        state.treino = parsed;
+        registrarUsoIA();
+      }
     }
   }catch(e){
     console.error(e);
-    state.treino = {erro:true, mensagem: "Falha de conexão com a IA."};
+    state.treino = {erro:true, mensagem: "Falha de conexão com a IA (" + (e && e.message ? e.message : "rede") + ")."};
   }
   state.treinoLoading = false;
   render();
@@ -1293,6 +1341,38 @@ function tabTreino(){
 
 /* ===== TAB 4: FECHAMENTO ===== */
 function tabFechamento(){
+  if (garantirCupom() && state.aluno && state.aluno.nome && state.aluno.nome.trim()) setTimeout(()=> salvarAtendimento(true), 0);
+  const cupomF = cupomParaAtendimento();
+  const box = "margin-top:12px;border:1.5px solid var(--gold);";
+  let cupomHtml;
+  if (!campanhaAtiva()){
+    cupomHtml = `<div class="summary-mini" style="${box}">
+      <div style="font-weight:800;color:var(--navy);">🎟️ Cupom de desconto</div>
+      <div style="margin-top:6px;font-size:14.5px;color:var(--muted);">${cupomF
+        ? `Campanha desligada pelo administrador, mas este aluno já tem o cupom <b>${escAttr(cupomF.codigo)}</b>, válido até ${dataBR(cupomF.validoAte)}.`
+        : "A campanha de desconto está desligada neste período. O atendimento sai sem cupom."}</div>
+    </div>`;
+  } else {
+    const oferece = state.ofereceDesconto !== false;
+    const toggle = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+      <span style="font-size:14.5px;color:var(--navy);font-weight:700;">Oferecer desconto a este aluno?</span>
+      <button class="btn ${oferece ? "btn-navy" : "btn-outline"}" id="cupSim" style="width:auto;padding:7px 16px;">Sim</button>
+      <button class="btn ${!oferece ? "btn-navy" : "btn-outline"}" id="cupNao" style="width:auto;padding:7px 16px;">Não</button>
+    </div>`;
+    let corpo;
+    if (!oferece) corpo = `Sem cupom: o PDF, o WhatsApp e a tela de obrigado saem sem desconto.`;
+    else if (!cupomF) corpo = `Nenhum plano com desconto está ativo no momento. Peça ao administrador para ativar um plano na aba Professores → Campanha.`;
+    else {
+      const linhas = (cupomF.planos || []).map(p => `<li>${escAttr(descPlano(p))}</li>`).join("");
+      corpo = `Cupom <b style="color:var(--navy);">${escAttr(cupomF.codigo)}</b> — válido até ${dataBR(cupomF.validoAte)}. O aluno escolhe o plano na tela de obrigado.
+        ${linhas ? `<ul style="margin:8px 0 0 18px;padding:0;">${linhas}</ul>` : (cupomF.percentual ? `<div>${escAttr(cupomF.percentual)}% de desconto.</div>` : "")}
+        <div style="margin-top:6px;">Já vai no PDF do aluno (com QR Code) e na mensagem do WhatsApp.</div>`;
+    }
+    cupomHtml = `<div class="summary-mini" style="${box}">
+      <div style="font-weight:800;color:var(--navy);margin-bottom:8px;">🎟️ Cupom de desconto do aluno</div>${toggle}
+      <div style="font-size:14.5px;color:var(--muted);">${corpo}</div>
+    </div>`;
+  }
   return `
   <h2>Fechamento do Atendimento</h2>
   <p class="desc">Salve o registro e exporte os PDFs — um pro aluno, outro de uso interno do professor.</p>
@@ -1300,9 +1380,10 @@ function tabFechamento(){
   <div class="summary-mini">
     <div><b>Aluno:</b> ${state.aluno.nome || "—"}</div>
     <div><b>Sexo:</b> ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'—'}</div>
-    <div><b>Avaliador:</b> ${state.professor}</div>
+    <div><b>Avaliador:</b> ${donoAtendimento()}</div>
     <div><b>Data:</b> ${state.aluno.data}</div>
   </div>
+  ${cupomHtml}
 
   <div class="close-actions">
     <div class="action-card save">
@@ -1348,7 +1429,7 @@ function tabFechamento(){
 
   <div class="footer-nav">
     <button class="btn btn-outline" id="prevTab">← Treino</button>
-    <span></span>
+    <button class="btn btn-navy" id="btnNovoAtend">➕ Novo atendimento</button>
   </div>`;
 }
 
@@ -1356,7 +1437,7 @@ function tabFechamento(){
 function gerarResumoTexto(){
   const selecionadas = Object.keys(state.deficienciasSelecionadas).filter(k=>state.deficienciasSelecionadas[k]);
   let txt = `PROTOCOLO DE MAPEAMENTO BIOMECÂNICO — SKY FIT ACADEMIA\n\n`;
-  txt += `Aluno: ${state.aluno.nome}\nSexo: ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'-'}\nAvaliador: ${state.professor}\nData: ${state.aluno.data}\n\n`;
+  txt += `Aluno: ${state.aluno.nome}\nSexo: ${state.aluno.sexo==='masculino'?'Masculino':state.aluno.sexo==='feminino'?'Feminino':'-'}\nAvaliador: ${donoAtendimento()}\nData: ${state.aluno.data}\n\n`;
   txt += `-- ANAMNESE --\nHistórico: ${state.anamnese.historico}\nLimitações: ${state.anamnese.limitacoes}\nCirurgias: ${state.anamnese.cirurgias}\nRestrições: ${state.anamnese.restricoes}\nObjetivo: ${state.anamnese.objetivo}\n\n`;
   txt += `-- DEFICIÊNCIAS IDENTIFICADAS --\n`;
   selecionadas.forEach(k=> txt += `- ${BASE_DEFICIENCIAS[k].titulo}\n`);
@@ -1373,14 +1454,15 @@ function gerarResumoTexto(){
 function gerarPDF(incluirTreino, dadosOverride){
   const d = dadosOverride || {
     aluno: state.aluno,
-    professor: state.professor,
+    professor: donoAtendimento(),
     anamnese: state.anamnese,
     testes: state.testes,
     squat: state.squat,
     deficienciasSelecionadas: state.deficienciasSelecionadas,
     deficienciaObsExtra: state.deficienciaObsExtra,
     treino: state.treino,
-    atendimentoId: getAtendimentoId()
+    atendimentoId: getAtendimentoId(),
+    cupom: cupomParaAtendimento()
   };
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
@@ -1472,6 +1554,7 @@ function gerarPDF(incluirTreino, dadosOverride){
   line(`Cirurgias/lesões: ${d.anamnese.cirurgias || "-"}`);
   line(`Restrições médicas: ${d.anamnese.restricoes || "-"}`);
   line(`Objetivo principal: ${d.anamnese.objetivo || "-"}`);
+  { const ft = textoFreqTipo(d.anamnese); if (ft.freq || ft.tipo) line(`Frequência semanal: ${ft.freq || "-"}  |  Treino sugerido: ${ft.tipo || "-"}`); }
   y += 3;
 
   section("Mapeamento Biomecânico");
@@ -1545,6 +1628,41 @@ function gerarPDF(incluirTreino, dadosOverride){
     });
   }
 
+  if (!incluirTreino && d.cupom && d.cupom.codigo){
+    const cPlanos = (d.cupom.planos || []).slice(0,4);
+    const cupH = Math.max(37, 24 + cPlanos.length*5.2);
+    ensureSpace(cupH + 8);
+    y += 2;
+    setFill([253,246,224]); setDraw(GOLD); doc.setLineWidth(0.6);
+    doc.roundedRect(MARGIN, y, CONTENT_W, cupH, 2, 2, "FD");
+    doc.setFont(undefined, "bold"); doc.setFontSize(10); setText(NAVY);
+    doc.text("CUPOM EXCLUSIVO DO SEU PROFESSOR", MARGIN+6, y+8);
+    doc.setFontSize(18); doc.text(String(d.cupom.codigo), MARGIN+6, y+20);
+    doc.setFont(undefined, "normal"); doc.setFontSize(8.6); setText(INK);
+    const ate = d.cupom.validoAte ? new Date(d.cupom.validoAte).toLocaleDateString("pt-BR") : "-";
+    doc.text(`Cortesia do prof. ${d.cupom.professor || d.professor || ""}`, MARGIN+6, y+26);
+    doc.text(`Valido ate ${ate}`, MARGIN+6, y+31);
+    let ly = y + 15;
+    doc.setFontSize(9);
+    if (cPlanos.length){
+      cPlanos.forEach(p=>{
+        const dur = p.duracao === "primeiro_mes" ? "no 1o mes" : p.duracao === "meses" ? `por ${p.meses} meses` : "durante todo o plano";
+        doc.text(`${p.nome}: ${p.pct}% OFF ${dur}`, MARGIN+62, ly); ly += 5.2;
+      });
+      doc.setFontSize(8); setText(MUTED);
+      doc.text("Aponte a camera para o QR Code e fale com a recepcao.", MARGIN+62, ly+1);
+    } else {
+      const pctTxt = d.cupom.percentual ? `${d.cupom.percentual}% de desconto na matricula` : "Desconto na matricula";
+      doc.splitTextToSize(`${pctTxt}. Aponte a camera para o QR Code e fale com a recepcao.`, CONTENT_W - 96).slice(0,4).forEach(l=>{ doc.text(l, MARGIN+62, ly); ly += 5; });
+    }
+    try{
+      const qrC = gerarQRDataUrl(linkCupom(d.cupom));
+      if (qrC) doc.addImage(qrC, "PNG", MARGIN+CONTENT_W-30, y+4, 26, 26);
+    }catch(e){ console.error(e); }
+    y += cupH + 5;
+    doc.setLineWidth(0.3);
+  }
+
   if (!incluirTreino){
     const idAvaliacao = d.atendimentoId;
     const baseUrl = window.location.href.split("?")[0];
@@ -1597,6 +1715,7 @@ function getAtendimentoId(){
 }
 
 async function salvarAtendimento(silencioso){
+  const dono = donoAtendimento();
   const registro = {
     id: getAtendimentoId(),
     aluno: state.aluno,
@@ -1606,15 +1725,22 @@ async function salvarAtendimento(silencioso){
     deficiencias: Object.keys(state.deficienciasSelecionadas).filter(k=>state.deficienciasSelecionadas[k]),
     deficienciaObsExtra: state.deficienciaObsExtra,
     treino: state.treino,
-    professor: state.professor,
+    professor: dono,
     criadoEm: state.criadoEmOriginal || new Date().toISOString(),
     atualizadoEm: new Date().toISOString()
   };
+  registro.ultimaEdicao = { por: state.professor, em: registro.atualizadoEm };
+  registro.ofereceDesconto = state.ofereceDesconto !== false;
+  const cupomAtual = cupomParaAtendimento();
+  if (cupomAtual) registro.cupom = cupomAtual;
+  state.atendimentoDono = dono;
   if (!state.criadoEmOriginal) state.criadoEmOriginal = registro.criadoEm;
   try{
     if (firebaseReady && db){
       const existente = await db.collection("atendimentos").where("id","==",registro.id).limit(1).get();
       if (!existente.empty){
+        const anterior = existente.docs[0].data();
+        if (anterior.venda) registro.venda = anterior.venda;
         await existente.docs[0].ref.set(registro);
       } else {
         await db.collection("atendimentos").add(registro);
@@ -1623,7 +1749,7 @@ async function salvarAtendimento(silencioso){
       const key = "skyfit_atendimentos";
       const arr = JSON.parse(localStorage.getItem(key) || "[]");
       const idx = arr.findIndex(a=>a.id===registro.id);
-      if (idx >= 0) arr[idx] = registro; else arr.push(registro);
+      if (idx >= 0){ if (arr[idx].venda) registro.venda = arr[idx].venda; arr[idx] = registro; } else arr.push(registro);
       localStorage.setItem(key, JSON.stringify(arr));
     }
     state.saveStatus = "ok";
@@ -1643,7 +1769,7 @@ async function salvarAtendimento(silencioso){
 function marcarNuvemStatus(ok){
   if (state.nuvemOk !== ok){
     state.nuvemOk = ok;
-    if (document.activeElement?.id !== "inRecado") render();
+    if (!campoEmEdicao()) render();
   }
 }
 
@@ -1667,6 +1793,10 @@ function carregarParaEdicao(a){
   state.deficienciaObsExtra = a.deficienciaObsExtra || "";
   state.treino = a.treino || null;
   state.atendimentoId = a.id;
+  state.atendimentoDono = a.professor || state.professor;
+  state.atendimentoCupom = a.cupom || null;
+  state.cupomForm = null;
+  state.ofereceDesconto = a.ofereceDesconto !== false;
   state.criadoEmOriginal = a.criadoEm || null;
   state.saveStatus = "";
   state.saveError = "";
@@ -1796,10 +1926,15 @@ function tabAlunos(){
       <div style="font-weight:800;color:var(--navy);font-size:16px;">${a.aluno?.nome || "-"}</div>
       <div style="color:var(--muted);font-size:14.5px;">Atendimento em ${formatarDataBR(a.aluno?.data)} — Professor: ${a.professor || "-"}</div>
     </div>
-    <button class="btn btn-outline" style="margin-top:10px;width:auto;padding:9px 16px;font-size:14.5px;" onclick="carregarParaEdicao(state.alunoSelecionado)">✏️ Editar este atendimento</button>
+    ${a.cupom ? `<p class="hint" style="margin:10px 0 0;">🎟️ Cupom ${escAttr(a.cupom.codigo)} — ${fechouVenda(a) ? "✅ aluno fechou o plano" : "oferecido ao aluno"}</p>` : ""}
+    ${a.ultimaEdicao && a.ultimaEdicao.por && a.ultimaEdicao.por !== a.professor ? `<p class="hint" style="margin:6px 0 0;">Última edição: ${escAttr(a.ultimaEdicao.por)} em ${dataBR(a.ultimaEdicao.em)}</p>` : ""}
+    ${(state.role !== "admin" && a.professor === state.professor)
+      ? `<button class="btn btn-outline" style="margin-top:10px;width:auto;padding:9px 16px;font-size:14.5px;" onclick="carregarParaEdicao(state.alunoSelecionado)">✏️ Editar este atendimento</button>`
+      : `<p class="hint" style="margin-top:10px;">Somente o professor ${escAttr(a.professor || "responsável")} pode editar este atendimento.</p>`}
 
     <div class="block-title" style="margin-top:16px;">Anamnese</div>
     <p><b>Objetivo:</b> ${a.anamnese?.objetivo || "-"}</p>
+    ${(()=>{ const ft = textoFreqTipo(a.anamnese); return (ft.freq||ft.tipo) ? `<p><b>Frequência / treino sugerido:</b> ${ft.freq || "-"} • ${ft.tipo || "-"}</p>` : ""; })()}
     <p><b>Limitações:</b> ${a.anamnese?.limitacoes || "-"}</p>
     <p><b>Restrições:</b> ${a.anamnese?.restricoes || "-"}</p>
     <p><b>Cirurgias:</b> ${a.anamnese?.cirurgias || "-"}</p>
@@ -2011,7 +2146,7 @@ function tabEstatisticas(){
 
   <div class="block-title" style="margin-top:28px;color:var(--restrito);">⚠️ Zona de Risco — Administrador</div>
   <div class="summary-mini" style="border:1.5px solid var(--restrito);">
-    <p class="hint" style="margin:0 0 12px;">Baixe um backup dos dados a qualquer momento, ou apague tudo (atendimentos + avaliações) para começar do zero. Recomendado: sempre baixe o backup antes de resetar.</p>
+    <p class="hint" style="margin:0 0 12px;">Baixe um backup dos dados a qualquer momento, ou apague tudo (atendimentos, avaliações, recados e contador de IA) para começar do zero. Recomendado: sempre baixe o backup antes de resetar.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn btn-outline" id="btnBackupAvulso" style="width:auto;padding:9px 16px;font-size:14.5px;">⬇️ Baixar backup agora</button>
       <button class="btn btn-outline" id="btnResetTudo" style="width:auto;padding:9px 16px;font-size:14.5px;color:var(--restrito);border-color:var(--restrito);">🗑️ Resetar tudo</button>
@@ -2043,14 +2178,14 @@ async function baixarBackup(){
 }
 
 async function resetarTudo(){
-  if (!confirm("Isso vai APAGAR todos os atendimentos e avaliações salvos (nuvem ou deste aparelho). Um backup será baixado automaticamente antes. Quer continuar?")) return;
+  if (!confirm("Isso vai APAGAR todos os atendimentos, avaliações, recados e o contador de uso da IA (nuvem ou deste aparelho). A chave de IA é mantida. Um backup será baixado automaticamente antes. Quer continuar?")) return;
   if (!confirm("Tem certeza mesmo? Essa ação não pode ser desfeita depois de confirmar.")) return;
 
   await baixarBackup();
 
   try{
     if (firebaseReady && db){
-      const colecoes = ["atendimentos", "avaliacoes"];
+      const colecoes = ["atendimentos", "avaliacoes", "recados", "uso_ia"];
       for (const nome of colecoes){
         const snap = await db.collection(nome).get();
         const docs = snap.docs;
@@ -2064,10 +2199,16 @@ async function resetarTudo(){
     } else {
       localStorage.removeItem("skyfit_atendimentos");
       localStorage.removeItem("skyfit_avaliacoes");
+      localStorage.removeItem("skyfit_recados");
+      localStorage.removeItem("skyfit_uso_ia");
     }
     toast("Tudo apagado. Começando do zero.");
     state.statsData = null;
     state.avaliacoesData = null;
+    state.recadosData = null;
+    state.hojeData = null;
+    state.recadosNovidades = 0;
+    state.avaliacoesNovidades = 0;
     abrirEstatisticas();
   }catch(e){
     console.error(e);
@@ -2089,6 +2230,36 @@ async function carregarAvaliacoes(){
     state.firestoreErro = e && e.message ? e.message : "falha desconhecida ao ler a nuvem";
     return [];
   }
+}
+
+/* ---------- PONTUAÇÃO DOS PROFESSORES (destaque do mês) ----------
+   Cada avaliação recebida vale: nota de 1 a 5 (= 1 a 5 pontos) + 1 ponto se o aluno
+   disse que o professor foi claro. Máximo de 6 pontos por avaliação.
+   Ranking do mês = soma dos pontos. Empate: maior média, depois mais avaliações. */
+function mesChave(iso){
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function nomeMes(chave){
+  const nomes = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const [a,m] = chave.split("-");
+  return `${nomes[parseInt(m,10)-1]} de ${a}`;
+}
+function pontosAvaliacao(d){
+  return (d.nota||0) + (d.clareza==="sim" ? 1 : 0);
+}
+function calcularRankingMes(dados, chave){
+  const por = {};
+  dados.filter(d => d.criadoEm && mesChave(d.criadoEm) === chave && d.professorAtendimento).forEach(d=>{
+    const p = d.professorAtendimento;
+    if (!por[p]) por[p] = { professor:p, pontos:0, soma:0, total:0 };
+    por[p].pontos += pontosAvaliacao(d);
+    por[p].soma += (d.nota||0);
+    por[p].total += 1;
+  });
+  return Object.values(por)
+    .map(r => ({ ...r, media: r.total ? r.soma/r.total : 0 }))
+    .sort((a,b)=> b.pontos-a.pontos || b.media-a.media || b.total-a.total);
 }
 
 async function abrirAvaliacoes(){
@@ -2183,19 +2354,40 @@ function tabAvaliacoes(){
     </div>
   </div>`}
 
-  ${isAdmin ? `
-  <div class="block-title">Nota Média por Professor</div>
-  ${(!a.rankingProfessores || a.rankingProfessores.length===0) ? `<p class="hint">Sem dados suficientes ainda.</p>` : a.rankingProfessores.map(r=>`
-    <div style="margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;font-size:14.5px;margin-bottom:3px;">
-        <span style="font-weight:700;color:var(--navy);">${r.professor}</span>
-        <span style="color:var(--muted);">${r.media} ★ (${r.total} avaliações)</span>
+  ${isAdmin ? (()=>{
+    const mesAtual = mesChave(new Date().toISOString());
+    const mesSel = state.rankingMes || mesAtual;
+    const meses = [...new Set([mesAtual, ...aFull.dados.filter(d=>d.criadoEm).map(d=>mesChave(d.criadoEm))])].sort().reverse();
+    const ranking = calcularRankingMes(aFull.dados, mesSel);
+    const topo = ranking.length ? ranking[0].pontos : 0;
+    return `
+  <div class="block-title">🏆 Ranking de Professores</div>
+  <div class="field" style="margin-bottom:10px;">
+    <label>Mês</label>
+    <select onchange="state.rankingMes=this.value;render()">
+      ${meses.map(m=>`<option value="${m}" ${m===mesSel?"selected":""}>${nomeMes(m)}</option>`).join("")}
+    </select>
+  </div>
+  <p class="hint" style="margin:0 0 12px;">Pontuação: cada avaliação vale a nota (1 a 5) + 1 ponto se o aluno disse que o professor foi claro (máx. 6 por avaliação).</p>
+  ${ranking.length===0 ? `<p class="hint">Nenhuma avaliação em ${nomeMes(mesSel)} ainda.</p>` : `
+  <div class="summary-mini" style="border:1.5px solid var(--gold);margin-bottom:14px;text-align:center;">
+    <div style="font-size:13px;color:var(--muted);">Professor destaque de ${nomeMes(mesSel)}${mesSel===mesAtual?" (até agora)":""}</div>
+    <div style="font-size:22px;font-weight:800;color:var(--navy);margin-top:4px;">🏆 ${ranking[0].professor}</div>
+    <div style="font-size:14.5px;color:var(--muted);">${ranking[0].pontos} pontos • ${ranking[0].media.toFixed(1)} ★ • ${ranking[0].total} avaliações</div>
+  </div>
+  ${ranking.map((r,i)=>`
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:14.5px;margin-bottom:3px;gap:8px;">
+        <span style="font-weight:700;color:var(--navy);">${i===0?"🥇":i===1?"🥈":i===2?"🥉":(i+1)+"º"} ${r.professor}</span>
+        <span style="font-weight:800;color:var(--navy);">${r.pontos} pts</span>
       </div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:4px;">${r.media.toFixed(1)} ★ de média • ${r.total} avaliações</div>
       <div style="background:#e9eef6;border-radius:6px;height:10px;overflow:hidden;">
-        <div style="width:${(r.media/5*100)}%;height:100%;background:linear-gradient(90deg,var(--gold),var(--red-dark));"></div>
+        <div style="width:${topo?Math.round(r.pontos/topo*100):0}%;height:100%;background:linear-gradient(90deg,var(--gold),var(--red-dark));"></div>
       </div>
-    </div>
-  `).join("")}` : ""}
+    </div>`).join("")}`}
+    `;
+  })() : ""}
 
   <div class="block-title">${isAdmin ? "Respostas Individuais" : "Minhas Respostas Individuais"}</div>
   ${a.dados.length===0 ? `<p class="hint">Nenhuma avaliação recebida ainda.</p>` : a.dados.map(d=>`
@@ -2248,7 +2440,7 @@ async function atualizarContadoresNovidade(){
       state.avaliacoesNovidades = avaliacoes.filter(a => (!ultimoAval || new Date(a.criadoEm) > new Date(ultimoAval))).length;
     }catch(e){ console.error(e); }
   }
-  if (document.activeElement?.id !== "inRecado") render();
+  if (!campoEmEdicao()) render();
 }
 setInterval(()=>{ if (state.screen === "app") atualizarContadoresNovidade(); }, 45000);
 
@@ -2478,7 +2670,7 @@ function tabRecados(){
         ${r.anexo ? `<img src="${r.anexo}" data-ver-anexo="${r.id}" style="margin-top:8px;max-width:200px;max-height:200px;border-radius:8px;border:1px solid var(--line);display:block;cursor:pointer;"/>` : ""}
         <button data-responder-recado="${r.id}" style="border:none;background:none;color:var(--sky);font-size:14px;font-weight:600;cursor:pointer;padding:6px 0 0;">↩ Responder</button>
       </div>
-      ${r.autor === state.professor ? `<button class="btn-icon-delete" data-apagar-recado="${r.id}" title="Apagar" style="border:none;background:none;color:var(--restrito);font-size:18px;cursor:pointer;padding:2px 8px;">✕</button>` : ""}
+      ${(r.autor === state.professor || state.role === "admin") ? `<button class="btn-icon-delete" data-apagar-recado="${r.id}" title="Apagar" style="border:none;background:none;color:var(--restrito);font-size:18px;cursor:pointer;padding:2px 8px;">✕</button>` : ""}
     </div>
   `).join("")}
   `;
@@ -2621,6 +2813,448 @@ function tabHoje(){
   `;
 }
 
+/* ---------- DONO FIXO DO ATENDIMENTO, CUPOM E NOVO ATENDIMENTO ---------- */
+const FLUXO_INICIAL = JSON.stringify({
+  aluno: state.aluno, anamnese: state.anamnese, testes: state.testes, squat: state.squat,
+  deficienciasSelecionadas: {}, deficienciaObsExtra: "", treino: null
+});
+function escAttr(s){
+  return String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function campoEmEdicao(){
+  const el = document.activeElement;
+  return !!(el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT"));
+}
+// O dono é quem CRIOU o atendimento. Quem está logado só vira dono de atendimento novo.
+function donoAtendimento(){
+  return state.atendimentoDono || state.professor;
+}
+function dataBR(iso){
+  try{ return new Date(iso).toLocaleDateString("pt-BR"); }catch(e){ return ""; }
+}
+function cupomParaAtendimento(){ return state.atendimentoCupom || null; }
+function campanhaAtiva(){ return (state.cupomConfig||{}).campanhaAtiva !== false; }
+const TIPOS_TREINO = {
+  corpo_inteiro: "Corpo inteiro (full body)",
+  padrao: "Treino tradicional (ABCD)",
+  outro: "Outro"
+};
+function textoFreqTipo(an){
+  an = an || {};
+  const freq = an.freqSemana ? `${an.freqSemana}x por semana` : "";
+  let tipo = an.tipoTreino ? (TIPOS_TREINO[an.tipoTreino] || "") : "";
+  if (an.tipoTreino === "outro" && an.tipoTreinoOutro) tipo = `Outro: ${an.tipoTreinoOutro}`;
+  return { freq, tipo };
+}
+function planosPadrao(){
+  return [
+    { id:"pl_mensal", nome:"Mensal", pct:10, duracao:"primeiro_mes", meses:1, ativo:true },
+    { id:"pl_tri", nome:"Trimestral", pct:15, duracao:"todo_plano", meses:3, ativo:false },
+    { id:"pl_sem", nome:"Semestral", pct:20, duracao:"todo_plano", meses:6, ativo:false },
+    { id:"pl_anual", nome:"Anual", pct:20, duracao:"todo_plano", meses:12, ativo:false }
+  ];
+}
+function planosAtivos(){
+  return ((state.cupomConfig||{}).planos || []).filter(p => p.ativo !== false && p.nome && parseFloat(p.pct) > 0);
+}
+function descDuracao(p){
+  if (p.duracao === "primeiro_mes") return "no 1º mês";
+  if (p.duracao === "meses") return `por ${p.meses || 1} ${(p.meses||1) == 1 ? "mês" : "meses"}`;
+  return "durante todo o plano";
+}
+function descPlano(p){ return `${p.nome}: ${p.pct}% OFF ${descDuracao(p)}`; }
+function recepcaoWpp(){
+  const n = String((state.cupomConfig||{}).recepcao || "5519971685416").replace(/\D/g,"");
+  return n.startsWith("55") ? n : "55" + n;
+}
+function linkCupom(c, plano){
+  const msg = plano
+    ? `Olá! Quero fazer minha matrícula no plano ${plano.nome} (${plano.pct}% de desconto ${descDuracao(plano)}) com o cupom ${c.codigo} do professor ${c.professor}.`
+    : c.percentual
+      ? `Olá! Quero fazer minha matrícula e vou usar o cupom ${c.codigo} (${c.percentual}% de desconto) do professor ${c.professor}.`
+      : `Olá! Quero fazer minha matrícula e vou usar o cupom ${c.codigo} do professor ${c.professor}.`;
+  return `https://wa.me/${recepcaoWpp()}?text=${encodeURIComponent(msg)}`;
+}
+function codigoBaseProfessor(nome){
+  return (String(nome).normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().split(/\s+/)[0] || "PROF").replace(/[^A-Z0-9]/g,"").slice(0,10) || "PROF";
+}
+function garantirCupom(){
+  if (state.atendimentoCupom || !campanhaAtiva() || state.ofereceDesconto === false) return false;
+  const planos = planosAtivos();
+  if (!planos.length) return false;
+  const dono = donoAtendimento();
+  const p = (state.professoresLista||[]).find(x => x.nome === dono);
+  const dias = parseInt((state.cupomConfig||{}).validadeDias,10) || 7;
+  const agora = new Date();
+  state.atendimentoCupom = {
+    codigo: (p && p.cupom) || codigoBaseProfessor(dono),
+    professor: dono,
+    planos: planos.map(x => ({ nome:x.nome, pct:parseFloat(x.pct), duracao:x.duracao||"primeiro_mes", meses:parseInt(x.meses,10)||1 })),
+    dias,
+    oferecidoEm: agora.toISOString(),
+    validoAte: new Date(agora.getTime() + dias*86400000).toISOString()
+  };
+  return true;
+}
+async function novoAtendimento(){
+  if (!confirm("Iniciar um novo atendimento? O atual já foi salvo no histórico (confira o status na aba Fechamento).")) return;
+  if (state.aluno && state.aluno.nome && state.aluno.nome.trim()) await salvarAtendimento(true);
+  const base = JSON.parse(FLUXO_INICIAL);
+  Object.assign(state, base, {
+    atendimentoId:null, atendimentoDono:null, atendimentoCupom:null, cupomForm:null, ofereceDesconto:true, criadoEmOriginal:null,
+    whatsapp:"", saveStatus:null, saveError:"", pdfStatus:null, pdfProfStatus:null, wppStatus:null, treinoLoading:false
+  });
+  state.aluno.data = new Date().toISOString().slice(0,10);
+  state.activeTab = 0;
+  toast("Novo atendimento iniciado.");
+  render();
+  requestAnimationFrame(()=> window.scrollTo(0,0));
+}
+
+/* ---------- PROFESSORES (lista do login) E CUPONS ---------- */
+function gerarCodigoCupom(nome, lista){
+  const base = (String(nome).normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase().split(/\s+/)[0] || "PROF").replace(/[^A-Z0-9]/g,"").slice(0,10) || "PROF";
+  const usados = new Set((lista||[]).map(p => (p.cupom||"").toUpperCase()));
+  let c = base, n = 2;
+  while (usados.has(c)){ c = base + n; n++; }
+  return c;
+}
+async function carregarProfessores(){
+  try{
+    let docs;
+    if (firebaseReady && db){
+      const snap = await db.collection("professores").get();
+      docs = snap.docs.map(d => d.data());
+    } else {
+      docs = JSON.parse(localStorage.getItem("skyfit_professores") || "[]");
+    }
+    const cfg = docs.find(d => d.id === "_config") || {};
+    state.cupomConfig = {
+      recepcao: cfg.recepcao || "5519971685416",
+      campanhaAtiva: cfg.campanhaAtiva !== false,
+      validadeDias: parseInt(cfg.validadeDias,10) || 7,
+      planos: Array.isArray(cfg.planos) && cfg.planos.length ? cfg.planos : planosPadrao()
+    };
+    state.professoresLista = docs.filter(d => d.id && d.id !== "_config" && d.nome)
+      .sort((a,b)=> a.nome.localeCompare(b.nome,"pt-BR"));
+    state.professoresErro = "";
+  }catch(e){
+    console.error(e);
+    state.professoresErro = e && e.message ? e.message : "falha desconhecida";
+    if (state.professoresLista === null) state.professoresLista = [];
+  }
+  return state.professoresLista;
+}
+async function gravarDocProfessores(obj){
+  if (firebaseReady && db){
+    await db.collection("professores").doc(obj.id).set(obj);
+  } else {
+    const arr = JSON.parse(localStorage.getItem("skyfit_professores") || "[]");
+    const i = arr.findIndex(x => x.id === obj.id);
+    if (i >= 0) arr[i] = obj; else arr.push(obj);
+    localStorage.setItem("skyfit_professores", JSON.stringify(arr));
+  }
+}
+async function apagarDocProfessores(id){
+  if (firebaseReady && db){
+    await db.collection("professores").doc(id).delete();
+  } else {
+    const arr = JSON.parse(localStorage.getItem("skyfit_professores") || "[]").filter(x => x.id !== id);
+    localStorage.setItem("skyfit_professores", JSON.stringify(arr));
+  }
+}
+function erroProfessores(e){
+  console.error(e);
+  alert("Não foi possível salvar: " + (e && e.message ? e.message : "falha desconhecida") + "\n\nSe for permissão, libere a coleção \"professores\" nas regras do Firestore.");
+}
+async function adicionarProfessor(){
+  const el = document.getElementById("inNovoProf");
+  const nome = (el && el.value || "").trim().replace(/\s+/g," ");
+  if (!nome){ toast("Digite o nome do professor."); return; }
+  const lista = state.professoresLista || [];
+  if (lista.some(p => p.nome.toLowerCase() === nome.toLowerCase())){ toast("Esse professor já está na lista."); return; }
+  const p = { id: "pf_" + Date.now().toString(36) + Math.random().toString(36).slice(2,5), nome, cupom: gerarCodigoCupom(nome, lista), ativo: true };
+  try{
+    await gravarDocProfessores(p);
+    state.professoresLista = [...lista, p].sort((a,b)=> a.nome.localeCompare(b.nome,"pt-BR"));
+    toast("Professor adicionado.");
+    render();
+  }catch(e){ erroProfessores(e); }
+}
+async function removerProfessor(id){
+  const p = (state.professoresLista||[]).find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`Remover ${p.nome} da lista? Os atendimentos dele continuam com o nome dele.`)) return;
+  try{
+    await apagarDocProfessores(id);
+    state.professoresLista = state.professoresLista.filter(x => x.id !== id);
+    render();
+  }catch(e){ erroProfessores(e); }
+}
+async function salvarCodigoProfessor(id){
+  const p = (state.professoresLista||[]).find(x => x.id === id);
+  const el = document.getElementById("inCupom_" + id);
+  if (!p || !el) return;
+  const codigo = el.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,12);
+  if (!codigo){ toast("Digite o código do cupom (letras e números)."); return; }
+  if (state.professoresLista.some(x => x.id !== id && (x.cupom||"").toUpperCase() === codigo)){ toast("Esse código já é de outro professor."); return; }
+  try{
+    const novo = { ...p, cupom: codigo };
+    await gravarDocProfessores(novo);
+    state.professoresLista = state.professoresLista.map(x => x.id === id ? novo : x);
+    toast("Cupom salvo. Vale para os próximos atendimentos.");
+    render();
+  }catch(e){ erroProfessores(e); }
+}
+function lerCamposCampanha(){
+  const c = state.cupomConfig;
+  const v = parseInt(document.getElementById("inValidade")?.value,10);
+  const rc = document.getElementById("inRecepcao")?.value;
+  if (v) c.validadeDias = v;
+  if (rc) c.recepcao = rc;
+}
+function setCampanha(v){ lerCamposCampanha(); state.cupomConfig.campanhaAtiva = v; render(); }
+function editPlano(i, campo, valor, rerender){
+  const p = state.cupomConfig.planos[i]; if (!p) return;
+  p[campo] = (campo === "pct" || campo === "meses") ? (parseFloat(valor) || "") : valor;
+  if (rerender){ lerCamposCampanha(); render(); }
+}
+function adicionarPlano(){
+  lerCamposCampanha();
+  state.cupomConfig.planos.push({ id:"pl_" + Date.now().toString(36), nome:"Novo plano", pct:10, duracao:"primeiro_mes", meses:1, ativo:false });
+  render();
+}
+function removerPlano(i){
+  if (!confirm("Remover este plano da tabela?")) return;
+  lerCamposCampanha();
+  state.cupomConfig.planos.splice(i,1);
+  render();
+}
+async function salvarCupomConfig(){
+  let n = (document.getElementById("inRecepcao")?.value || "").replace(/\D/g,"");
+  if (n.length < 10){ toast("Digite o número da recepção com DDD."); return; }
+  if (!n.startsWith("55")) n = "55" + n;
+  const validadeDias = parseInt(document.getElementById("inValidade")?.value, 10);
+  if (!validadeDias || validadeDias < 1){ toast("Informe a validade do cupom em dias."); return; }
+  const planos = (state.cupomConfig.planos || []).map(p => ({
+    id: p.id || "pl_" + Math.random().toString(36).slice(2,8),
+    nome: String(p.nome||"").trim(),
+    pct: parseFloat(p.pct),
+    duracao: p.duracao || "primeiro_mes",
+    meses: parseInt(p.meses,10) || 1,
+    ativo: p.ativo !== false
+  }));
+  if (planos.some(p => !p.nome || !(p.pct > 0 && p.pct <= 100))){ toast("Cada plano precisa de nome e desconto entre 1 e 100%."); return; }
+  const novo = { recepcao: n, campanhaAtiva: state.cupomConfig.campanhaAtiva !== false, validadeDias, planos };
+  if (novo.campanhaAtiva && !planos.some(p => p.ativo)) toast("Atenção: nenhum plano está ativo, então não será gerado cupom.");
+  try{
+    await gravarDocProfessores({ id:"_config", ...novo });
+    state.cupomConfig = novo;
+    toast(novo.campanhaAtiva ? "Campanha salva (ligada)." : "Campanha salva (desligada).");
+    render();
+  }catch(e){ erroProfessores(e); }
+}
+function validarSessaoContraLista(){
+  if (state.screen !== "app" || state.role === "admin") return;
+  const lista = (state.professoresLista || []).filter(p => p.ativo !== false);
+  if (lista.length && !lista.some(p => p.nome === state.professor)){
+    encerrarSessao();
+    render();
+    toast("Entre de novo escolhendo seu nome na lista.");
+  }
+}
+async function popularSelectLogin(){
+  if (state.professoresLista === null) await carregarProfessores();
+  const sel = document.getElementById("inNomeSel");
+  const inp = document.getElementById("inNome");
+  if (!sel || !inp) return;
+  const lista = (state.professoresLista || []).filter(p => p.ativo !== false);
+  state.loginSemLista = lista.length === 0;
+  if (state.loginSemLista){ sel.style.display = "none"; inp.style.display = "block"; return; }
+  const atual = sel.value;
+  sel.innerHTML = `<option value="">Selecione seu nome...</option>` +
+    lista.map(p => `<option value="${escAttr(p.nome)}">${escAttr(p.nome)}</option>`).join("") +
+    `<option value="__admin__">Administração</option>`;
+  if (atual && [...sel.options].some(o => o.value === atual)) sel.value = atual;
+  sel.style.display = "block";
+  inp.style.display = sel.value === "__admin__" ? "block" : "none";
+  sel.onchange = ()=>{
+    inp.style.display = sel.value === "__admin__" ? "block" : "none";
+    inp.placeholder = "Seu nome (administração)";
+  };
+}
+
+function tabProfessores(){
+  if (state.professoresLista === null){
+    carregarProfessores().then(()=> render());
+    return `<h2>Professores e Cupons</h2><div class="ai-box"><div class="spinner"></div></div>`;
+  }
+  const lista = state.professoresLista;
+  const cfg = state.cupomConfig || {};
+  return `
+  <h2>Professores</h2>
+  <p class="desc">Os professores escolhem o nome nesta lista ao entrar, e o atendimento fica sempre no nome de quem criou. Cada professor define a porcentagem, a validade e o código do cupom na hora do atendimento.</p>
+  ${state.professoresErro ? `<div class="err" style="display:block;margin-bottom:14px;">⚠️ Erro ao ler a lista: ${escAttr(state.professoresErro)}. Confira as regras do Firestore para a coleção "professores".</div>` : ""}
+
+  <div class="block-title">Campanha de desconto</div>
+  <div class="summary-mini" style="margin-bottom:18px;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <span style="font-weight:700;color:var(--navy);">Campanha:</span>
+      <button class="btn ${cfg.campanhaAtiva!==false ? "btn-navy" : "btn-outline"}" id="campOn" onclick="setCampanha(true)" style="width:auto;padding:7px 16px;">Ligada</button>
+      <button class="btn ${cfg.campanhaAtiva===false ? "btn-navy" : "btn-outline"}" id="campOff" onclick="setCampanha(false)" style="width:auto;padding:7px 16px;">Desligada</button>
+    </div>
+    <p class="hint" style="margin:0 0 12px;">Desligada: ninguém gera cupom e os atendimentos saem sem desconto. Cupons já enviados continuam valendo até o fim da validade e mantêm os planos que foram prometidos.</p>
+
+    <div style="font-weight:700;color:var(--navy);margin-bottom:6px;">Planos com desconto</div>
+    <p class="hint" style="margin:0 0 8px;">Marque os planos <b>ativos</b> no período. O aluno escolhe entre os ativos na tela de obrigado.</p>
+    ${(cfg.planos||[]).map((p,i)=>`
+    <div style="border:1.5px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px;background:#fff;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div style="flex:2;min-width:120px;"><label style="font-size:12.5px;color:var(--muted);">Plano</label>
+          <input type="text" value="${escAttr(p.nome)}" oninput="editPlano(${i},'nome',this.value)" style="width:100%;padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);font-size:16px;"/></div>
+        <div style="flex:1;min-width:70px;"><label style="font-size:12.5px;color:var(--muted);">Desconto %</label>
+          <input type="number" min="1" max="100" value="${escAttr(p.pct)}" oninput="editPlano(${i},'pct',this.value)" style="width:100%;padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);font-size:16px;"/></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:8px;">
+        <div style="flex:2;min-width:150px;"><label style="font-size:12.5px;color:var(--muted);">Vale por</label>
+          <select onchange="editPlano(${i},'duracao',this.value,true)" style="width:100%;padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);font-size:16px;">
+            <option value="primeiro_mes" ${p.duracao==="primeiro_mes"?"selected":""}>Só no 1º mês</option>
+            <option value="todo_plano" ${p.duracao==="todo_plano"?"selected":""}>Durante todo o plano</option>
+            <option value="meses" ${p.duracao==="meses"?"selected":""}>Por X meses</option>
+          </select></div>
+        ${p.duracao==="meses" ? `<div style="flex:1;min-width:70px;"><label style="font-size:12.5px;color:var(--muted);">Meses</label>
+          <input type="number" min="1" value="${escAttr(p.meses||1)}" oninput="editPlano(${i},'meses',this.value)" style="width:100%;padding:8px 10px;border-radius:8px;border:1.5px solid var(--line);font-size:16px;"/></div>` : ""}
+        <label style="display:flex;gap:6px;align-items:center;font-weight:700;color:var(--navy);font-size:15px;"><input type="checkbox" ${p.ativo!==false?"checked":""} onchange="editPlano(${i},'ativo',this.checked)" style="width:20px;height:20px;"/>Ativo</label>
+        <button class="btn btn-outline" onclick="removerPlano(${i})" style="width:auto;padding:7px 12px;color:var(--restrito);border-color:var(--restrito);">Remover</button>
+      </div>
+    </div>`).join("")}
+    <button class="btn btn-outline" onclick="adicionarPlano()" style="width:auto;padding:8px 16px;margin-bottom:14px;">+ Adicionar plano</button>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div class="field" style="flex:1;min-width:140px;"><label>Validade do cupom (dias para o aluno fechar)</label><input id="inValidade" type="number" min="1" value="${escAttr(cfg.validadeDias)}"/></div>
+    </div>
+    <div class="field"><label>WhatsApp da recepção (com DDD) — recebe a mensagem do aluno ao usar o cupom</label>
+      <input id="inRecepcao" type="text" value="${escAttr(cfg.recepcao)}" placeholder="5519971685416"/></div>
+    <button class="btn btn-navy" onclick="salvarCupomConfig()" style="width:auto;padding:10px 20px;">Salvar campanha</button>
+  </div>
+
+  <div class="block-title">Professores (${lista.length})</div>
+  ${lista.length === 0 ? `<p class="hint">Nenhum professor cadastrado ainda. Enquanto a lista estiver vazia, o login continua aceitando nome digitado.</p>` : lista.map(p => `
+    <div class="summary-mini" style="margin-bottom:8px;">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:8px;">${escAttr(p.nome)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-outline" onclick="removerProfessor('${p.id}')" style="width:auto;padding:9px 14px;color:var(--restrito);border-color:var(--restrito);">Remover</button>
+      </div>
+    </div>`).join("")}
+
+  <div class="block-title" style="margin-top:18px;">Adicionar professor</div>
+  <div class="field"><label>Nome (como vai aparecer no login e no PDF)</label>
+    <input id="inNovoProf" type="text" placeholder="Ex: Diego" autocomplete="off"/></div>
+  <button class="btn btn-navy" onclick="adicionarProfessor()" style="width:auto;padding:10px 20px;">Adicionar</button>
+  `;
+}
+
+/* ---------- VENDAS (cupons oferecidos x fechados) ---------- */
+function fechouVenda(a){ return !!(a.venda && a.venda.status === "fechou"); }
+async function abrirVendas(){
+  state.vendasLoading = true;
+  render();
+  const todos = await carregarAtendimentos();
+  state.vendasData = todos.filter(a => a.cupom && a.cupom.codigo)
+    .sort((a,b)=> new Date(b.cupom.oferecidoEm||0) - new Date(a.cupom.oferecidoEm||0));
+  state.vendasLoading = false;
+  render();
+}
+async function marcarVenda(id, fechou){
+  let planoFechado = "";
+  if (fechou){
+    const r = prompt("Qual plano o aluno fechou? (opcional, ex.: Semestral)");
+    if (r === null) return;
+    planoFechado = r.trim();
+  }
+  const vendaObj = { status:"fechou", marcadoPor: state.professor, em: new Date().toISOString(), plano: planoFechado };
+  try{
+    if (firebaseReady && db){
+      const snap = await db.collection("atendimentos").where("id","==",id).limit(1).get();
+      if (snap.empty){ toast("Atendimento não encontrado."); return; }
+      await snap.docs[0].ref.update({ venda: fechou ? vendaObj : firebase.firestore.FieldValue.delete() });
+    } else {
+      const arr = JSON.parse(localStorage.getItem("skyfit_atendimentos") || "[]");
+      const i = arr.findIndex(a => a.id === id);
+      if (i < 0) return;
+      if (fechou) arr[i].venda = vendaObj; else delete arr[i].venda;
+      localStorage.setItem("skyfit_atendimentos", JSON.stringify(arr));
+    }
+    const a = (state.vendasData||[]).find(x => x.id === id);
+    if (a){ if (fechou) a.venda = vendaObj; else delete a.venda; }
+    toast(fechou ? "Marcado como fechado." : "Marcação desfeita.");
+    render();
+  }catch(e){
+    console.error(e);
+    toast("Erro ao atualizar: " + (e && e.message ? e.message : "falha desconhecida"));
+  }
+}
+function tabVendas(){
+  if (state.vendasLoading || !state.vendasData){
+    if (!state.vendasLoading) abrirVendas();
+    return `<h2>Vendas por Cupom</h2><div class="ai-box"><div class="spinner"></div><p style="color:var(--muted);font-size:15px;margin:0;">Carregando...</p></div>`;
+  }
+  const todos = state.vendasData;
+  const mesAtual = mesChave(new Date().toISOString());
+  const mesSel = state.vendasMes || mesAtual;
+  const meses = [...new Set([mesAtual, ...todos.filter(a=>a.cupom.oferecidoEm).map(a => mesChave(a.cupom.oferecidoEm))])].sort().reverse();
+  const doMes = todos.filter(a => a.cupom.oferecidoEm && mesChave(a.cupom.oferecidoEm) === mesSel);
+  const fechados = doMes.filter(fechouVenda).length;
+  const conv = doMes.length ? Math.round(fechados / doMes.length * 100) : 0;
+  const por = {};
+  doMes.forEach(a => {
+    const p = a.cupom.professor || a.professor || "-";
+    if (!por[p]) por[p] = { professor:p, oferecidos:0, fechados:0 };
+    por[p].oferecidos++;
+    if (fechouVenda(a)) por[p].fechados++;
+  });
+  const ranking = Object.values(por).sort((a,b)=> b.fechados - a.fechados || b.oferecidos - a.oferecidos);
+  const agora = new Date();
+  return `
+  <h2>Vendas por Cupom</h2>
+  <p class="desc">Cada cupom enviado pelo professor aparece aqui, com quem indicou. Quando o aluno se matricular, marque como "Fechou".</p>
+  <div class="field" style="margin-bottom:12px;">
+    <label>Mês</label>
+    <select onchange="state.vendasMes=this.value;render()">
+      ${meses.map(m => `<option value="${m}" ${m===mesSel?"selected":""}>${nomeMes(m)}</option>`).join("")}
+    </select>
+  </div>
+  <div class="grid2" style="margin-bottom:18px;">
+    <div class="summary-mini" style="text-align:center;"><div style="font-size:26px;font-weight:800;color:var(--navy);">${doMes.length}</div><div>Cupons oferecidos</div></div>
+    <div class="summary-mini" style="text-align:center;"><div style="font-size:26px;font-weight:800;color:var(--ok);">${fechados}</div><div>Fechamentos (${conv}%)</div></div>
+  </div>
+
+  <div class="block-title">Por professor</div>
+  ${ranking.length === 0 ? `<p class="hint">Nenhum cupom em ${nomeMes(mesSel)} ainda.</p>` : ranking.map(r => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px;font-size:15px;">
+      <span style="font-weight:700;color:var(--navy);">${escAttr(r.professor)}</span>
+      <span style="color:var(--muted);">${r.fechados} de ${r.oferecidos} fecharam (${r.oferecidos ? Math.round(r.fechados/r.oferecidos*100) : 0}%)</span>
+    </div>`).join("")}
+
+  <div class="block-title" style="margin-top:20px;">Cupons do mês</div>
+  ${doMes.length === 0 ? `<p class="hint">Nada por aqui ainda.</p>` : doMes.map(a => {
+    const fechou = fechouVenda(a);
+    const vencido = !fechou && a.cupom.validoAte && new Date(a.cupom.validoAte) < agora;
+    return `
+    <div class="summary-mini" style="margin-bottom:8px;">
+      <div style="font-weight:700;color:var(--navy);">${escAttr(a.aluno?.nome || "-")}</div>
+      <div style="color:var(--muted);font-size:14.5px;">Professor ${escAttr(a.cupom.professor||a.professor||"-")} • cupom ${escAttr(a.cupom.codigo)}${a.cupom.percentual ? " (" + escAttr(a.cupom.percentual) + "%)" : ""} • oferecido em ${dataBR(a.cupom.oferecidoEm)}${a.cupom.validoAte ? " • vale até " + dataBR(a.cupom.validoAte) : ""}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <span style="font-weight:700;color:${fechou ? "var(--ok)" : vencido ? "var(--restrito)" : "var(--muted)"};">${fechou ? "✅ Fechou em " + dataBR(a.venda.em) + (a.venda.plano ? " • plano " + escAttr(a.venda.plano) : "") : vencido ? "⌛ Vencido" : "Em aberto"}</span>
+        ${fechou
+          ? `<button class="btn btn-outline" onclick="marcarVenda('${a.id}', false)" style="width:auto;padding:7px 12px;font-size:14px;">Desfazer</button>`
+          : `<button class="btn btn-navy" onclick="marcarVenda('${a.id}', true)" style="width:auto;padding:7px 14px;font-size:14px;">Marcar como fechou</button>`}
+      </div>
+    </div>`;
+  }).join("")}
+  `;
+}
+
 /* ---------- EVENTOS ---------- */
 function irParaTab(i){
   saveCurrentTabInputs();
@@ -2629,6 +3263,8 @@ function irParaTab(i){
   const nome = currentTabs()[i];
   if (nome === "Recados") state.recadosData = null;
   if (nome === "Hoje") state.hojeData = null;
+  if (nome === "Vendas") state.vendasData = null;
+  if (nome === "Professores") state.professoresLista = null;
   if (nome === "Estatísticas") state.statsData = null;
   if (nome === "Avaliações") state.avaliacoesData = null;
   if (nome === "Alunos") { state.alunoBuscaQuery = ""; state.alunoBuscaResultados = null; state.alunoSelecionado = null; }
@@ -2698,6 +3334,14 @@ function attachAppEvents(){
   bindText("anCir", state.anamnese, "cirurgias");
   bindText("anRes", state.anamnese, "restricoes");
   bindText("anObj", state.anamnese, "objetivo");
+  document.querySelectorAll("[data-freq]").forEach(btn=>{
+    btn.onclick = ()=>{ const v = btn.dataset.freq; state.anamnese.freqSemana = String(state.anamnese.freqSemana)===v ? "" : v; render(); };
+  });
+  document.querySelectorAll("[data-tipotreino]").forEach(btn=>{
+    btn.onclick = ()=>{ const v = btn.dataset.tipotreino; state.anamnese.tipoTreino = state.anamnese.tipoTreino===v ? "" : v; render(); };
+  });
+  const anTipoOutro = document.getElementById("anTipoOutro");
+  if (anTipoOutro) anTipoOutro.oninput = ()=> state.anamnese.tipoTreinoOutro = anTipoOutro.value;
   bindText("anParqDet", state.anamnese, "parqDetalhes");
   document.querySelectorAll("[data-parq]").forEach(btn=>{
     btn.onclick = ()=>{
@@ -2710,7 +3354,7 @@ function attachAppEvents(){
   if (alConsentimento) alConsentimento.onchange = ()=> state.anamnese.consentimentoParq = alConsentimento.checked;
 
   // Tab 1
-  document.querySelectorAll(".status-btn:not([data-parq]):not([data-sexo])").forEach(btn=>{
+  document.querySelectorAll(".status-btn:not([data-parq]):not([data-sexo]):not([data-freq]):not([data-tipotreino])").forEach(btn=>{
     btn.onclick = ()=>{
       const key = btn.dataset.test, status = btn.dataset.status;
       if (!key) return; // botão de outra seção, já tem handler próprio
@@ -2763,8 +3407,10 @@ function attachAppEvents(){
     const input = document.getElementById("inputApiKey");
     const nova = (input?.value || "").trim();
     if (nova){
-      await setApiKey(nova);
-      toast(firebaseReady ? "Chave salva na nuvem — vale para todos os aparelhos." : "Chave salva neste aparelho.");
+      const okNuvem = await setApiKey(nova);
+      if (!firebaseReady) toast("Chave salva neste aparelho.");
+      else if (okNuvem) toast("Chave salva na nuvem — vale para todos os aparelhos.");
+      else alert("A chave foi salva SÓ NESTE APARELHO. A nuvem recusou a gravação:\n\n" + state.apiKeyErroNuvem + "\n\nOs outros professores não vão conseguir gerar treino até o Firestore liberar a coleção \"config\" nas regras.");
       render();
     } else {
       toast("Cole a chave antes de salvar.");
@@ -2811,6 +3457,8 @@ function attachAppEvents(){
   if (btnWpp) btnWpp.onclick = async ()=>{
     const num = (state.whatsapp||"").replace(/\D/g,"");
     if (!num){ toast("Digite o WhatsApp."); return; }
+    if (garantirCupom()) state.saveStatus = null;
+    if (campanhaAtiva() && state.ofereceDesconto !== false && !cupomParaAtendimento() && !confirm("Você ainda não gerou o cupom de desconto deste aluno. Enviar assim mesmo (sem cupom)?")) return;
     if (state.saveStatus !== "ok"){
       await salvarAtendimento();
     }
@@ -2821,8 +3469,13 @@ function attachAppEvents(){
     const baseUrl = window.location.href.split("?")[0];
     const linkAvaliacao = `${baseUrl}?avaliar=${id}`;
     const linkPdf = `${baseUrl}?pdf=${id}`;
+    garantirCupom();
+    const cupW = cupomParaAtendimento();
+    const planosTxt = cupW && cupW.planos ? "\n" + cupW.planos.map(p => `• ${descPlano(p)}`).join("\n") : "";
+    const cupomTxt = cupW ? `\n\n🎟️ Presente do professor ${cupW.professor}: cupom *${cupW.codigo}* na sua matrícula${planosTxt}\nVálido até ${dataBR(cupW.validoAte)}. Toque para garantir:\n${linkCupom(cupW)}` : "";
+    const primeiro = (state.aluno.nome||"").trim().split(/\s+/)[0] || "";
     const texto = encodeURIComponent(
-      `*Protocolo de Mapeamento Biomecânico — Skyfit Park Palmeiras*\nAluno: ${state.aluno.nome}\nAvaliador: ${state.professor}\nData: ${state.aluno.data}\n\nBaixe o PDF do seu atendimento aqui:\n${linkPdf}\n\nPor favor, avalie seu atendimento com o professor ${state.professor} através do link abaixo (rápido e anônimo):\n${linkAvaliacao}`
+      `*Skyfit Park Palmeiras* 💪\nOlá${primeiro ? ", " + primeiro : ""}! Seu mapeamento biomecânico com o professor ${donoAtendimento()} está pronto:\n📄 ${linkPdf}${cupomTxt}\n\n⭐ Avalie seu atendimento em 1 minuto:\n${linkAvaliacao}`
     );
     window.open(`https://wa.me/55${num}?text=${texto}`, "_blank");
   };
@@ -2865,6 +3518,20 @@ function attachAppEvents(){
     };
   });
 
+  const cupSim = document.getElementById("cupSim"), cupNao = document.getElementById("cupNao");
+  if (cupSim) cupSim.onclick = ()=>{ state.ofereceDesconto = true; render(); };
+  if (cupNao) cupNao.onclick = async ()=>{
+    state.ofereceDesconto = false;
+    if (state.atendimentoCupom){
+      if (!confirm("Remover o cupom já gerado deste aluno?")){ state.ofereceDesconto = true; return; }
+      state.atendimentoCupom = null;
+      if (state.aluno && state.aluno.nome && state.aluno.nome.trim()) await salvarAtendimento(true);
+    }
+    render();
+  };
+  const btnNovoAtend = document.getElementById("btnNovoAtend");
+  if (btnNovoAtend) btnNovoAtend.onclick = ()=> novoAtendimento();
+
   // Tab Hoje
   const btnRecarregarHoje = document.getElementById("btnRecarregarHoje");
   if (btnRecarregarHoje) btnRecarregarHoje.onclick = ()=>{ state.hojeData = null; abrirHoje(); };
@@ -2875,21 +3542,92 @@ function saveCurrentTabInputs(){
 }
 
 /* ---------- TELA PÚBLICA: AVALIAÇÃO ANÔNIMA DO ALUNO ---------- */
+async function carregarConfigRecepcaoPublica(){
+  try{
+    if (firebaseReady && db){
+      const snap = await db.collection("professores").where("id","==","_config").limit(1).get();
+      if (!snap.empty && snap.docs[0].data().recepcao) state.cupomConfig = { recepcao: snap.docs[0].data().recepcao };
+    }
+  }catch(e){ console.error(e); }
+}
+function infoPublicaDoAtendimento(d){
+  if (!d) return { professor:"", primeiroAtendimento:false, nome:"", objetivo:"", nPontos:0, cupom:null };
+  const nome = ((d.aluno && d.aluno.nome) || "").trim().split(/\s+/)[0] || "";
+  const obj = ((d.anamnese && d.anamnese.objetivo) || "").trim();
+  return {
+    professor: d.professor || "",
+    primeiroAtendimento: !!(d.aluno && d.aluno.primeiroAtendimento),
+    nome,
+    objetivo: obj.length > 0 && obj.length <= 80 ? obj : "",
+    nPontos: Array.isArray(d.deficiencias) ? d.deficiencias.length : 0,
+    cupom: d.cupom && d.cupom.codigo ? d.cupom : null
+  };
+}
 async function buscarAtendimentoPorId(id){
   try{
     if (firebaseReady && db){
       const snap = await db.collection("atendimentos").where("id","==",id).limit(1).get();
-      if (!snap.empty){
-        const d = snap.docs[0].data();
-        return { professor: d.professor || "", primeiroAtendimento: !!(d.aluno && d.aluno.primeiroAtendimento) };
-      }
-      return { professor: "", primeiroAtendimento: false };
+      return infoPublicaDoAtendimento(snap.empty ? null : snap.docs[0].data());
     } else {
       const arr = JSON.parse(localStorage.getItem("skyfit_atendimentos") || "[]");
-      const found = arr.find(a=>a.id===id);
-      return found ? { professor: found.professor||"", primeiroAtendimento: !!(found.aluno && found.aluno.primeiroAtendimento) } : { professor:"", primeiroAtendimento:false };
+      return infoPublicaDoAtendimento(arr.find(a=>a.id===id) || null);
     }
-  }catch(e){ console.error(e); return { professor:"", primeiroAtendimento:false }; }
+  }catch(e){ console.error(e); return infoPublicaDoAtendimento(null); }
+}
+function htmlObrigadoComCupom(info, jaRegistrada){
+  const c = info.cupom;
+  const valido = c && (!c.validoAte || new Date(c.validoAte) >= new Date());
+  const nome = escAttr(info.nome);
+  const topo = `
+    <img src="${LOGO_SKYFIT}" alt="Skyfit Park Palmeiras" style="display:block;width:96px;height:96px;margin:0 auto 10px;object-fit:contain;"/>
+    <h1 style="margin-bottom:6px;">Obrigado${nome ? ", " + nome : ""}! 🙏</h1>
+    <p class="sub" style="text-transform:none;letter-spacing:0;">${jaRegistrada ? "Sua avaliação já foi registrada." : "Sua avaliação foi enviada. Ela ajuda muito o time da Skyfit."}</p>`;
+  if (!valido) return `<div class="login-wrap"><div class="login-card" style="text-align:center;">${topo}</div></div>`;
+  const prof = escAttr(c.professor || info.professor);
+  const pontos = info.nPontos > 0
+    ? `Seu mapeamento encontrou <b>${info.nPontos} ponto${info.nPontos>1?"s":""} de atenção</b> que podem ser corrigidos com o treino certo.`
+    : `Seu mapeamento mostrou o caminho para treinar do jeito certo para o seu corpo.`;
+  const objetivo = info.objetivo ? ` Seu objetivo — <i>“${escAttr(info.objetivo)}”</i> — fica bem mais perto com acompanhamento.` : "";
+  const planos = c.planos || [];
+  const opcoes = planos.length
+    ? `<div style="font-weight:700;color:var(--navy);margin:0 0 8px;font-size:15px;">${planos.length > 1 ? "Escolha o plano com desconto:" : "Seu desconto:"}</div>` +
+      planos.map((p,i)=>`
+      <label style="display:flex;gap:10px;align-items:center;background:#fff;border:2px solid ${i===0?"var(--gold)":"var(--line)"};border-radius:12px;padding:11px 12px;margin-bottom:8px;cursor:pointer;" data-plano-card="${i}">
+        <input type="radio" name="planoCupom" value="${i}" ${i===0?"checked":""} style="width:20px;height:20px;flex:none;${planos.length===1?"display:none;":""}"/>
+        <span style="flex:1;"><b style="color:var(--navy);font-size:16px;">${escAttr(p.nome)}</b><br><span style="font-size:13.5px;color:var(--muted);">${escAttr(descDuracao(p))}</span></span>
+        <span style="font-size:22px;font-weight:900;color:var(--navy);white-space:nowrap;">${escAttr(p.pct)}% OFF</span>
+      </label>`).join("")
+    : (c.percentual ? `<div style="text-align:center;font-size:32px;font-weight:900;color:var(--navy);margin-bottom:8px;">${escAttr(c.percentual)}% OFF</div>` : "");
+  return `
+  <div class="login-wrap"><div class="login-card" style="text-align:center;">
+    ${topo}
+    <div style="margin-top:18px;padding:18px 16px;border-radius:14px;border:2px solid var(--gold);background:#fdf6e0;text-align:left;">
+      <div style="font-weight:800;color:var(--navy);font-size:17px;margin-bottom:8px;text-align:center;">🎁 Um presente do professor ${prof}</div>
+      <p style="margin:0 0 8px;font-size:15.5px;line-height:1.5;color:#222;">${pontos}${objetivo}</p>
+      <p style="margin:0 0 14px;font-size:15.5px;line-height:1.5;color:#222;">O melhor momento para começar é <b>agora</b>, com o diagnóstico fresco e o professor que já conhece o seu corpo.</p>
+      ${opcoes}
+      <div style="text-align:center;font-size:13px;color:var(--muted);margin:4px 0 12px;">Cupom <b style="letter-spacing:1px;color:var(--navy);">${escAttr(c.codigo)}</b> · válido até ${dataBR(c.validoAte)}</div>
+      <a id="btnUsarCupom" href="${escAttr(linkCupom(c, planos[0]))}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none;background:#25d366;color:#fff;font-weight:800;font-size:17px;padding:14px;border-radius:12px;">💬 Quero usar meu desconto</a>
+      <p style="margin:8px 0 0;font-size:12.5px;color:var(--muted);text-align:center;">Abre o WhatsApp da recepção com a mensagem pronta.</p>
+    </div>
+  </div></div>`;
+}
+function mostrarObrigado(info, jaRegistrada){
+  const root = document.getElementById("root");
+  root.innerHTML = htmlObrigadoComCupom(info, jaRegistrada);
+  window.scrollTo(0,0);
+  const c = info.cupom;
+  if (!c || !c.planos) return;
+  const btn = document.getElementById("btnUsarCupom");
+  document.querySelectorAll('input[name="planoCupom"]').forEach(r=>{
+    r.onchange = ()=>{
+      const i = parseInt(r.value,10);
+      if (btn) btn.href = linkCupom(c, c.planos[i]);
+      document.querySelectorAll("[data-plano-card]").forEach(card=>{
+        card.style.borderColor = parseInt(card.dataset.planoCard,10) === i ? "var(--gold)" : "var(--line)";
+      });
+    };
+  });
 }
 
 /* ---------- TELA PÚBLICA: BAIXAR PDF DO ALUNO POR LINK ---------- */
@@ -2918,7 +3656,8 @@ function registroParaDadosPDF(registro){
     deficienciasSelecionadas,
     deficienciaObsExtra: registro.deficienciaObsExtra,
     treino: registro.treino,
-    atendimentoId: registro.id
+    atendimentoId: registro.id,
+    cupom: registro.cupom || null
   };
 }
 
@@ -2975,11 +3714,9 @@ async function renderAvaliacaoPublica(id){
   </div></div>`;
   const jaAvaliou = await avaliacaoJaExiste(id);
   if (jaAvaliou){
-    root.innerHTML = `
-    <div class="login-wrap"><div class="login-card" style="text-align:center;">
-      <h1>Obrigado!</h1>
-      <p class="sub" style="text-transform:none;letter-spacing:0;">Sua avaliação já foi registrada. 🙏</p>
-    </div></div>`;
+    await carregarConfigRecepcaoPublica();
+    const infoJa = await buscarAtendimentoPorId(id);
+    mostrarObrigado(infoJa, true);
     return;
   }
   const info = await buscarAtendimentoPorId(id);
@@ -3093,7 +3830,8 @@ async function renderAvaliacaoPublica(id){
         localStorage.setItem("skyfit_avaliacoes", JSON.stringify(arr));
       }
       localStorage.setItem("avaliado_"+id, "1");
-      renderAvaliacaoPublica(id);
+      await carregarConfigRecepcaoPublica();
+      mostrarObrigado(info, false);
     }catch(e){
       console.error(e);
       err.textContent = "Erro ao enviar: " + (e && e.message ? e.message : "falha desconhecida") + ". Tire um print desta tela e mande pro professor.";
@@ -3111,7 +3849,7 @@ if (avaliarId){
 } else {
   const sessaoRestaurada = restaurarSessao();
   render();
-  if (sessaoRestaurada) { atualizarContadoresNovidade(); carregarApiKeyDaNuvem(); }
+  if (sessaoRestaurada) { atualizarContadoresNovidade(); carregarApiKeyDaNuvem(); carregarProfessores().then(validarSessaoContraLista); }
 }
 
 </script>
